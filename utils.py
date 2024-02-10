@@ -31,3 +31,11 @@ def load_encrypted_xlsx(file_path, sheet_name=None):
 
 def flatten(l):
     return [item for sublist in l for item in sublist]
+
+
+def safe_conversion_to_datetime(date):
+    try:
+        return pd.to_datetime(date)
+    except:
+        return pd.NaT
+
