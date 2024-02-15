@@ -4,7 +4,7 @@ import getpass
 import msoffcrypto
 
 
-def load_encrypted_xlsx(file_path, sheet_name=None):
+def load_encrypted_xlsx(file_path, sheet_name=None, password=None):
     """
         Loads an encrypted Excel file and returns the data as a pandas DataFrame.
 
@@ -15,7 +15,8 @@ def load_encrypted_xlsx(file_path, sheet_name=None):
         Returns:
             pandas.DataFrame: The data from the specified sheet as a DataFrame.
     """
-    password = getpass.getpass()
+    if password is None:
+        password = getpass.getpass()
     decrypted_workbook = io.BytesIO()
     with open(file_path, 'rb') as file:
         office_file = msoffcrypto.OfficeFile(file)
