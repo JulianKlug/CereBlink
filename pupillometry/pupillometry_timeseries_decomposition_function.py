@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import getpass
 os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Resources"
+from rpy2.rinterface_lib.embedded import RRuntimeError
 from pymer4.models import Lmer
 import statsmodels.stats.multitest
 from multipy.fdr import qvalue
@@ -16,7 +17,11 @@ from utils import safe_conversion_to_datetime
 def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, registry_pdms_correspondence_path,
                                   output_dir,
                                   timebin_hours, target, censure_data_after_first_positive_CT, use_span, password=None,
-                                  exclude_nan_outcome=True, normalise_to_prior_max=True):
+                                  exclude_nan_outcome=True, normalise_to_prior_max=True, use_R=False, save_data=False):
+    # pandas version > 2 needed for correct string processing and sns > 12 for correct histplot
+    assert int(pd.__version__[0]) >= 2, 'Please update pandas to version 2 or higher'
+    assert int(sns.__version__.split('.')[1]) >= 12, 'Please update seaborn to version 0.12.0 or higher'
+
     # Timeseries decomposition
     # Goal: decompose timeseries into timebins of X hours and seperate if end of timebin includes CT showing DCI / vasospasm or not
     registry_df = load_encrypted_xlsx(registry_data_path, password=password)
@@ -102,13 +107,10 @@ def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, re
     # add column to registry_df indicating if pupillometry data is available
     registry_df['pupillometry_available'] = 0
     for index, row in registry_df.iterrows():
-        if pupillometry_df.loc[(pupillometry_df['Name'] == row['Name'])
-                               & (pupillometry_df['Date_birth'] == row['Date_birth'])
-                               & (pupillometry_df['SOS-CENTER-YEAR-NO.'] == row['SOS-CENTER-YEAR-NO.'])].shape[0] > 0:
-            registry_df.loc[(registry_df['Name'] == row['Name'])
-                            & (registry_df['Date_birth'] == row['Date_birth'])
-                            & (registry_df['SOS-CENTER-YEAR-NO.'] == row[
-                'SOS-CENTER-YEAR-NO.']), 'pupillometry_available'] = 1
+        if row.pNr is np.nan:
+            continue
+        if pupillometry_df.loc[(pupillometry_df['pNr'] == row['pNr'])].shape[0] > 0:
+            registry_df.loc[(registry_df['pNr'] == row['pNr']), 'pupillometry_available'] = 1
 
     n_patients_with_pupillometry_but_no_outcome = \
     registry_df[(registry_df['DCI_YN_verified'].isnull()) & (registry_df['pupillometry_available'] == 1)][
@@ -236,9 +238,6 @@ def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, re
                                                                                       'timePupil'] == time_of_pupillometry), 'CV_l_value_normalised'] = normalisation(
                         row['CV_l_value'], max_CV_l_value)
 
-        # replace non normalized values with normalized values
-        pupillometry_df.drop(columns=['NPI_r_value', 'NPI_l_value', 'CV_r_value', 'CV_l_value'], inplace=True)
-
         norm_hist_fig, ax = plt.subplots(2, 2, figsize=(15, 10))
         sns.histplot(pupillometry_df['NPI_r_value_normalised'], ax=ax[0, 0])
         sns.histplot(pupillometry_df['NPI_l_value_normalised'], ax=ax[0, 1])
@@ -248,6 +247,11 @@ def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, re
         norm_hist_fig.savefig(os.path.join(output_dir, f'normalised_pupillometry_histograms_{timebin_hours}h_timebin.png'),
                                 dpi=300, bbox_inches='tight')
 
+        if save_data:
+            pupillometry_df.to_csv(os.path.join(output_dir, f'{target}_normalised_pupillometry_df.csv'))
+
+        pupillometry_df.drop(columns=['NPI_r_value', 'NPI_l_value', 'CV_r_value', 'CV_l_value'], inplace=True)
+        # replace non normalized values with normalized values
         pupillometry_df.rename(
             columns={'NPI_r_value_normalised': 'NPI_r_value', 'NPI_l_value_normalised': 'NPI_l_value',
                      'CV_r_value_normalised': 'CV_r_value', 'CV_l_value_normalised': 'CV_l_value'}, inplace=True)
@@ -451,31 +455,98 @@ def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, re
         print(f'Number of positive timebins for {metric}: {n_positive_timebins}')
         print(f'Number of negative timebins for {metric}: {n_negative_timebins}')
 
-    ### Stats
     reassembled_pupillometry_df['Name'] = reassembled_pupillometry_df['Name'].astype(str)
     reassembled_pupillometry_df['pNr'] = reassembled_pupillometry_df['pNr'].astype(int).astype(str)
 
-    pvals_per_metric = {}
-    model_warnings_df = pd.DataFrame(columns=['metric', 'warning'])
-    for metric in tqdm(timebin_metrics, total=len(timebin_metrics)):
-        metric_df = reassembled_pupillometry_df[[metric, 'label', 'pNr']]
-        metric_df.dropna(subset=[metric], inplace=True)
-        model = Lmer(f"label  ~ {metric}  + (1|pNr)",
-                     data=metric_df, family='binomial')
-        model.fit(control="optimizer='Nelder_Mead'")
+    if save_data:
+        # Save reassembled pupillometry data
+        pupillometry_timebins_file_name = f'{target}_reassembled_pupillometry_{timebin_hours}h_timebin'
+        if normalise_to_prior_max:
+            pupillometry_timebins_file_name += '_normalised'
+        if use_span:
+            pupillometry_timebins_file_name += '_with_span'
+        reassembled_pupillometry_df.to_csv(os.path.join(output_dir, pupillometry_timebins_file_name + '.csv'))
 
-        # singular fit is allowed (pNr may not always have enough variance to have an effect, we want to include it anyway)
-        allowed_warning = 'boundary (singular) fit: see ?isSingular'
-        # do not allow any other warnings
-        if len(model.warnings) > 0:
-            # assert all([allowed_warning == warning for warning in model.warnings])
-            if not all([allowed_warning == warning for warning in model.warnings]):
-                model_warnings_df = pd.concat([model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': [model.warnings]})])
-        pvals_per_metric[metric] = model.coefs['P-val'].to_dict()[metric]
+    ### Stats
+    # Use pymer4
+    if not use_R:
+        pvals_per_metric = {}
+        model_warnings_df = pd.DataFrame(columns=['metric', 'warning'])
+        for metric in tqdm(timebin_metrics, total=len(timebin_metrics)):
+            metric_df = reassembled_pupillometry_df[[metric, 'label', 'pNr']]
+            metric_df.dropna(subset=[metric], inplace=True)
+            model = Lmer(f"label  ~ {metric}  + (1|pNr)",
+                         data=metric_df, family='binomial')
+            model.fit(control="optimizer='Nelder_Mead'")
+
+            # singular fit is allowed (pNr may not always have enough variance to have an effect, we want to include it anyway)
+            allowed_warning = 'boundary (singular) fit: see ?isSingular'
+            # do not allow any other warnings
+            if len(model.warnings) > 0:
+                # assert all([allowed_warning == warning for warning in model.warnings])
+                if not all([allowed_warning == warning for warning in model.warnings]):
+                    model_warnings_df = pd.concat([model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': [model.warnings]})])
+            pvals_per_metric[metric] = model.coefs['P-val'].to_dict()[metric]
+    # directly call R
+    else:
+        from rpy2.robjects.packages import importr
+        from rpy2.robjects import pandas2ri
+        import rpy2.robjects as ro
+
+        stats = importr('stats')
+        lme4 = importr('lme4')
+        base = importr('base')
+        lmerT = importr('lmerTest')
+
+        r_pvals_per_metric = {}
+        r_model_warnings_df = pd.DataFrame(columns=['metric', 'warning'])
+
+        for metric in tqdm(timebin_metrics, total=len(timebin_metrics)):
+            metric_df = reassembled_pupillometry_df[[metric, 'label', 'pNr']]
+            metric_df.dropna(subset=[metric], inplace=True)
+            with (ro.default_converter + pandas2ri.converter).context():
+                metric_r_df = ro.conversion.get_conversion().py2rpy(metric_df)
+
+            # lmc = ro.r(f'lmerControl({"optCtrl = list(ftol_abs=1e-15, xtol_abs=1e-15)"})')
+            try:
+                model = lmerT.lmer(f"label  ~ {metric}  + (1|pNr)",
+                               data=metric_r_df)
+                coeffs = base.summary(model).rx2('coefficients')
+                indices = np.asarray(list(coeffs.names)[0])
+                column_names = np.asarray(list(coeffs.names)[1])
+
+                with (ro.default_converter + pandas2ri.converter).context():
+                    coeffs_df = pd.DataFrame(ro.conversion.get_conversion().rpy2py(coeffs),
+                                             index=indices, columns=column_names)
+
+                r_pvals_per_metric[metric] = coeffs_df.loc[metric, 'Pr(>|t|)']
+
+                warnings = base.summary(model).rx2('warnings')
+                # check if warnings is null
+                if warnings != ro.rinterface.NULL:
+                    r_model_warnings_df = pd.concat(
+                        [r_model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': [warnings]})])
+            # Catch non definite VtV (happens when there is not enough variance in the random effect, ie single sample in pos. class
+            except Exception as e:
+                accepted_errors = ['Erreur dans eval_f(x, ...) : Downdated VtV is not positive definite\n',
+                                     'Erreur dans asMethod(object) : not a positive definite matrix\n',
+                                   'Erreur dans devfun(theta) : Downdated VtV is not positive definite\n']
+                if (isinstance(e, RRuntimeError) and e.args[0] in accepted_errors):
+                    print(f'Error in metric: {metric}')
+                    r_pvals_per_metric[metric] = 1
+                    r_model_warnings_df = pd.concat(
+                        [r_model_warnings_df, pd.DataFrame({'metric': [metric],
+                                                            'warning': [str(e) + ', n_pos=' + str(metric_df.label.sum())]})])
+                else:
+                    raise e
+
+        pvals_per_metric = r_pvals_per_metric
+        model_warnings_df = r_model_warnings_df
+
 
     pvals_per_metric_df = pd.DataFrame.from_dict(pvals_per_metric, orient='index', columns=['pval'])
 
-    # pvals_per_metric_df = pvals_per_metric_df.merge(model_warnings_df, left_index=True, right_on='metric', how='left')
+    pvals_per_metric_df = pvals_per_metric_df.merge(model_warnings_df.set_index('metric'), left_index=True, right_index=True, how='left')
 
     ## Correct for multiple comparisons
     # correct for with Reiner et al 2003 (independence of measures not needed)
@@ -496,10 +567,6 @@ def plot_timeseries_decomposition(registry_data_path, pupillometry_data_path, re
     if use_span:
         pval_file_name += '_with_span'
     pvals_per_metric_df.to_csv(os.path.join(output_dir, pval_file_name + '.csv'))
-
-    if model_warnings_df.shape[0] > 0:
-        # save model warnings
-        model_warnings_df.to_csv(os.path.join(output_dir, pval_file_name + '_model_warnings.csv'))
 
     ### Plot
     # create a plot with a subplot for every timebin metric, with a scatterplot of metric vs label
@@ -557,16 +624,18 @@ if __name__ == '__main__':
     registry_data_path = '/Users/jk1/Library/CloudStorage/OneDrive-unige.ch/icu_research/dci_sah/data/sos_sah_data/post_hoc_modified_aSAH_DATA_2009_2023_24122023.xlsx'
     pupillometry_data_path = '/Users/jk1/Library/CloudStorage/OneDrive-unige.ch/icu_research/dci_sah/data/pdms_data/Transfer Urs.pietsch@kssg.ch 22.01.24, 15_34/20240117_SAH_SOS_Pupillometrie.csv'
     registry_pdms_correspondence_path = '/Users/jk1/Library/CloudStorage/OneDrive-unige.ch/icu_research/dci_sah/data/pdms_data/registry_pdms_correspondence.csv'
-    output_dir = '/Users/jk1/Downloads'
+    output_dir = '/Users/jk1/Downloads/data_saving'
     password = getpass.getpass()
 
     timebin_hours_choices = [24, 12, 8, 6]
-    targets = ['DCI_infarct', 'DCI_ischemia']
-    use_span = [True, False]
+    targets = ['DCI_ischemia', 'DCI_infarct']
+    use_span = [False]
     censure_data_after_first_positive_CT = True
     normalise_to_prior_max = [True, False]
-    # exclude_nan_outcome = [True, False]
     exclude_nan_outcome = [False]
+
+    use_R = True
+    save_data = True
 
     # generate all combinations of parameters
     for exclude in exclude_nan_outcome:
@@ -576,6 +645,18 @@ if __name__ == '__main__':
             for target in targets:
                 for span in use_span:
                     for normalise in normalise_to_prior_max:
+                        if normalise:
+                            target_figure_name = f'{target}_pupillometry_data_{timebin_hours}h_timebin_normalised'
+                        else:
+                            target_figure_name = f'{target}_pupillometry_data_{timebin_hours}h_timebin'
+                        if span:
+                            target_figure_name += '_with_span'
+                        # check if figure already exists
+                        if os.path.exists(os.path.join(dir, target_figure_name + '.png')):
+                            print(f'Figure {target_figure_name} already exists, skipping')
+                            continue
+
+                        print(f'Generating data and figure {target_figure_name}')
                         plot_timeseries_decomposition(registry_data_path=registry_data_path, pupillometry_data_path=pupillometry_data_path,
                                                       registry_pdms_correspondence_path=registry_pdms_correspondence_path,
                                                       output_dir=dir,
@@ -583,7 +664,9 @@ if __name__ == '__main__':
                                                       target=target, censure_data_after_first_positive_CT=censure_data_after_first_positive_CT,
                                                       use_span=span, password=password,
                                                       exclude_nan_outcome=exclude,
-                                                      normalise_to_prior_max=normalise)
+                                                      normalise_to_prior_max=normalise,
+                                                      use_R=use_R,
+                                                      save_data=save_data)
 
 
 
