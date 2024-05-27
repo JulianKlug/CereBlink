@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import math, os
 from tqdm import tqdm
-from utils import load_encrypted_xlsx, safe_conversion_to_datetime, ensure_dir
+from utils.utils import load_encrypted_xlsx, safe_conversion_to_datetime, ensure_dir
 
 
 def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_correspondence_path,

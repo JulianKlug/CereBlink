@@ -1,11 +1,10 @@
 import os
-from getpass import getpass
+import getpass
 
 import pandas as pd
 from bp.bp_timeseries_decomposition import bp_timeseries_decomposition
 from bp.noradrenaline_preprocessing import annotate_concomitant_noradrenaline, filter_out_concomitant_noradrenaline
-from utils import ensure_dir
-
+from utils.utils import ensure_dir
 
 
 def bp_preprocessing_pipeline(registry_data_path, bp_data_path, registry_pdms_correspondence_path, nor_df_path,

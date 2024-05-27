@@ -49,5 +49,9 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
     fig.savefig(os.path.join(input_folder, f'DCI_ischemia_bp_metrics_over_timebins_nor_filter.png'), format='png', dpi=300)
 
 
-input_folder = '/Users/jk1/temp/bp_dci'
-plot_metric_per_timebin_boxplots(input_folder)
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--input_folder', type=str, required=True)
+    args = parser.parse_args()
+    plot_metric_per_timebin_boxplots(args.input_folder)
