@@ -1,3 +1,4 @@
+import os
 import pandas as pd
 import io
 import getpass
@@ -40,3 +41,7 @@ def safe_conversion_to_datetime(date):
     except:
         return pd.NaT
 
+
+def ensure_dir(dir):
+    if not os.path.exists(dir):
+        os.makedirs(dir)
