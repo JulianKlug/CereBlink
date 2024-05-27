@@ -5,12 +5,6 @@ from tqdm import tqdm
 from utils import load_encrypted_xlsx, safe_conversion_to_datetime, ensure_dir
 
 
-# ToDo:
-# - filter from a certain date
-# - count patients at every step
-# - filter out errors
-# - only parse into timebins - no analysis?
-
 def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_correspondence_path,
                                 timebin_hours, target,
                                 censor_data_after_first_event=True, password=None,
@@ -20,9 +14,9 @@ def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_corre
     Decompose the blood pressure time series into timebins
 
     Aceppted ranges for blood pressure values:
-    - systole: 0-300
-    - diastole: 0-200
-    - mean pressure: 0-250
+    - systole: 1-300
+    - diastole: 1-200
+    - mean pressure: 1-250
 
     :param registry_data_path:
     :param bp_data_path:
@@ -71,15 +65,19 @@ def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_corre
     assert bp_df['mitteldruck'].apply(lambda x: pd.to_numeric(x, errors='coerce')).isnull().sum() == 0
 
     # Restrict to accepted ranges
-    n_sys_out_of_range = bp_df[(bp_df['systole'] < 0) | (bp_df['systole'] > 300)].shape[0]
-    n_dia_out_of_range = bp_df[(bp_df['diastole'] < 0) | (bp_df['diastole'] > 200)].shape[0]
-    n_mitt_out_of_range = bp_df[(bp_df['mitteldruck'] < 0) | (bp_df['mitteldruck'] > 250)].shape[0]
+    n_sys_out_of_range = bp_df[(bp_df['systole'] < 1) | (bp_df['systole'] > 300)].shape[0]
+    n_dia_out_of_range = bp_df[(bp_df['diastole'] < 1) | (bp_df['diastole'] > 200)].shape[0]
+    n_mitt_out_of_range = bp_df[(bp_df['mitteldruck'] < 1) | (bp_df['mitteldruck'] > 250)].shape[0]
     # accepted range for systole: 0-300
-    bp_df = bp_df[(bp_df['systole'] >= 0) & (bp_df['systole'] <= 300)]
+    bp_df = bp_df[(bp_df['systole'] >= 1) & (bp_df['systole'] <= 300)]
     # accepted range for diastole: 0-200
-    bp_df = bp_df[(bp_df['diastole'] >= 0) & (bp_df['diastole'] <= 200)]
+    bp_df = bp_df[(bp_df['diastole'] >= 1) & (bp_df['diastole'] <= 200)]
     # accepted range for mitteldruck: 0-250
-    bp_df = bp_df[(bp_df['mitteldruck'] >= 0) & (bp_df['mitteldruck'] <= 250)]
+    bp_df = bp_df[(bp_df['mitteldruck'] >= 1) & (bp_df['mitteldruck'] <= 250)]
+
+    # remove rows in which systole == diastole == mitteldruck
+    n_patients_with_equal_values = bp_df[(bp_df['systole'] == bp_df['diastole']) & (bp_df['diastole'] == bp_df['mitteldruck'])].shape[0]
+    bp_df = bp_df[~((bp_df['systole'] == bp_df['diastole']) & (bp_df['diastole'] == bp_df['mitteldruck']))]
 
     if verbose:
         print(f'Number of systole values out of range: {n_sys_out_of_range}')
@@ -188,6 +186,7 @@ def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_corre
     log_df = pd.DataFrame({'n_sys_out_of_range': [n_sys_out_of_range],
                             'n_dia_out_of_range': [n_dia_out_of_range],
                             'n_mitt_out_of_range': [n_mitt_out_of_range],
+                           'n_patients_with_equal_values': [n_patients_with_equal_values],
                             'n_patients_before_filtering_year': [n_patients_before_filtering_year],
                             'n_patients_after_filtering_year': [n_patients_after_filtering_year],
                             'n_patients_with_bp_but_no_outcome': [n_patients_with_bp_but_no_outcome],
@@ -238,7 +237,7 @@ if __name__ == '__main__':
     ensure_dir(os.path.join(args.output_dir, folder_name))
     ensure_dir(os.path.join(args.output_dir, folder_name, 'logs'))
     bp_df.to_csv(os.path.join(args.output_dir, folder_name, f'bp_timebins_{args.timebin_hours}h.csv'), index=False)
-    log_df.to_csv(os.path.join(args.output_dir, folder_name, 'logs', f'log_{args.timebin_hours}h.csv'), index=False)
+    log_df.to_csv(os.path.join(args.output_dir, folder_name, 'logs', f'timeseries_decomposition_log_{args.timebin_hours}h.csv'), index=False)
     missing_outcomes_df.to_csv(
         os.path.join(args.output_dir, folder_name, 'logs', f'missing_outcomes_{args.timebin_hours}h.csv'), index=False)
     missing_bp_data_df.to_csv(
