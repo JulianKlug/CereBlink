@@ -13,6 +13,8 @@ import rpy2.robjects as ro
 
 from bp.bp_timebin_metrics import bp_timebin_metrics
 
+assert int(pd.__version__[0]) >= 2, 'Ensure CereBlink env is used (and not annotations)'
+
 
 def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'max'],
                      bp_metrics=['systole', 'diastole', 'mitteldruck'], use_R=False):
@@ -112,7 +114,8 @@ def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'ma
     return pvals_per_metric_df
 
 
-def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handling='filter', use_R=True):
+def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handling='filter', normalisation=False,
+                           use_R=True):
     overall_stats = pd.DataFrame()
     for timebin_folder in os.listdir(input_folder):
         if not timebin_folder.startswith('bp_timebin_'):
@@ -127,14 +130,22 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
         else:
             raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
 
+        if normalisation:
+            raise NotImplementedError('Normalisation not implemented')
+
         timebin_bp_df = pd.read_csv(timebin_bp_path)
         timebin_metrics_df, timebin_creation_log_df = bp_timebin_metrics(timebin_bp_df, verbose=verbose)
+        timebin_metrics_df['timebin_size'] = int(timebin_size)
 
         timebin_metrics_df.to_csv(timebin_bp_path.replace('.csv', '_metrics.csv'), index=False)
         timebin_creation_log_df.to_csv(os.path.join(timebin_folder_path, 'logs', f'timebin_creation_log_{timebin_size}h_nor_{noradrenaline_handling}.csv'), index=False)
 
         timebin_pvals_per_metric_df = timebin_analysis(timebin_metrics_df, use_R=use_R)
         timebin_pvals_per_metric_df['timebin_size'] = int(timebin_size)
+        timebin_pvals_per_metric_df['noradrenaline_handling'] = noradrenaline_handling
+        timebin_pvals_per_metric_df['normalisation'] = normalisation
+        timebin_pvals_per_metric_df.reset_index(inplace=True)
+        timebin_pvals_per_metric_df.rename(columns={'index': 'metric'}, inplace=True)
         timebin_pvals_per_metric_df.to_csv(os.path.join(timebin_folder_path, f'timebin_pvals_{timebin_size}h_nor_{noradrenaline_handling}.csv'), index=False)
 
         overall_stats = pd.concat([overall_stats, timebin_pvals_per_metric_df])

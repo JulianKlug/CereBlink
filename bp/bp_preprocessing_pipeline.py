@@ -77,6 +77,7 @@ def bp_preprocessing_pipeline(registry_data_path, bp_data_path, registry_pdms_co
 
         # 3. filter out concomitant noradrenaline
         filtered_annotated_timebin_bp_df, filtering_logs_df = filter_out_concomitant_noradrenaline(annotated_timebin_bp_df, verbose=verbose)
+        filtered_annotated_timebin_bp_df['noradrenaline_handling'] = 'filter'
         filtered_annotated_timebin_bp_df.to_csv(os.path.join(output_dir, timebin_folder_name, f'bp_timebins_{timebin_hours}h_nor_filtered.csv'), index=False)
         filtering_logs_df.to_csv(os.path.join(output_dir, timebin_folder_name, 'logs', f'filtering_logs_{timebin_hours}h.csv'), index=False)
 
