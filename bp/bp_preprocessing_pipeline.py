@@ -4,6 +4,7 @@ import getpass
 import pandas as pd
 from bp.bp_timeseries_decomposition import bp_timeseries_decomposition
 from bp.noradrenaline_preprocessing import annotate_concomitant_noradrenaline, filter_out_concomitant_noradrenaline
+from bp.normalisation import parallel_normalise
 from utils.utils import ensure_dir
 
 
@@ -16,7 +17,7 @@ def bp_preprocessing_pipeline(registry_data_path, bp_data_path, registry_pdms_co
     # 1- timeseries decomposition
     # 2- annotate concomitant noradrenaline
     # 3- filter out concomitant noradrenaline (ToDo: or correct for noradrenaline)
-    # (ToDo: 4- normalise)
+    # 4- normalise
 
     :param registry_data_path:
     :param bp_data_path:
@@ -81,7 +82,8 @@ def bp_preprocessing_pipeline(registry_data_path, bp_data_path, registry_pdms_co
         filtering_logs_df.to_csv(os.path.join(output_dir, timebin_folder_name, 'logs', f'filtering_logs_{timebin_hours}h.csv'), index=False)
 
         # 4. normalise
-        # ToDo
+        normalised_filtered_annotated_timebin_bp_df = parallel_normalise(filtered_annotated_timebin_bp_df, bp_metrics=['systole', 'diastole', 'mitteldruck'])
+        normalised_filtered_annotated_timebin_bp_df.to_csv(os.path.join(output_dir, timebin_folder_name, f'bp_timebins_{timebin_hours}h_nor_filtered_normalised.csv'), index=False)
 
     if verbose:
         print('Preprocessing done.')

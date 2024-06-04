@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import getpass
 import msoffcrypto
-
+import asyncio
 
 def load_encrypted_xlsx(file_path, sheet_name=None, password=None):
     """
@@ -45,3 +45,10 @@ def safe_conversion_to_datetime(date):
 def ensure_dir(dir):
     if not os.path.exists(dir):
         os.makedirs(dir)
+
+
+def background(f):
+    def wrapped(*args, **kwargs):
+        return asyncio.get_event_loop().run_in_executor(None, f, *args, **kwargs)
+
+    return wrapped
