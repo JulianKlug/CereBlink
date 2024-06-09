@@ -10,6 +10,7 @@ assert int(pd.__version__[0]) >= 2, 'Ensure CereBlink env is used (and not annot
 
 def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handling='filter', normalisation=False,
                             bp_metrics=['systole', 'diastole', 'mitteldruck'],
+                           timebin_hours=None,
                            use_R=True):
     overall_stats = pd.DataFrame()
 
@@ -21,6 +22,9 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
             continue
         timebin_folder_path = os.path.join(input_folder, timebin_folder)
         timebin_size = int(timebin_folder.split('_')[-1][:-1])
+
+        if timebin_hours is not None and timebin_size not in timebin_hours:
+            continue
 
         if verbose:
             print(f'Analyzing timebin {timebin_size}h')
@@ -84,10 +88,13 @@ if __name__ == '__main__':
     parser.add_argument('-nor', '--noradrenaline_handling', type=str, default='filter')
     parser.add_argument('-N', '--normalisation', action='store_true')
     parser.add_argument('-r', '--use_R', action='store_true')
+    parser.add_argument('-t', '--timebin_hours', type=int, required=True, nargs='+', help='List of timebin hours')
 
 
     args = parser.parse_args()
 
     multi_timebin_analysis(args.input_folder, verbose=args.verbose, noradrenaline_handling=args.noradrenaline_handling,
                            normalisation=args.normalisation,
+                            bp_metrics=['systole', 'diastole', 'mitteldruck'],
+                            timebin_hours=args.timebin_hours,
                            use_R=args.use_R)
