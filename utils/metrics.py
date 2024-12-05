@@ -33,6 +33,11 @@ def complexity_index(data, embedding_dimension=2, scales=2, F_Order=3, F_Num=0.5
     if 'pandas' in str(type(data)):
         data = data.values
 
+    # Todo: perhaps handling of nan values in data should be more intelligent than just removing them
+    # https://github.com/MattWillFlood/EntropyHub/issues/17#issue-2720508289
+    # Remove NaNs
+    data = data[~np.isnan(data)]
+
     # embedding dimension m and tolerance r are in most cases assumed to be 2 and 0.2*signal SD (standard deviation)
     r = 0.2 * np.std(data)
     Mobj = EH.MSobject('SampEn', m=embedding_dimension, r=r)

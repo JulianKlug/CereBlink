@@ -24,11 +24,14 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
 
         if noradrenaline_handling == 'filter':
             timebin_metrics_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_nor_filtered_metrics.csv')
+        elif noradrenaline_handling is None:
+            timebin_metrics_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_metrics.csv')
         else:
             raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
 
         if normalisation:
-            timebin_metrics_path = timebin_metrics_path.replace('_nor_filtered_metrics.csv', '_nor_filtered_normalised_metrics_normalised.csv')
+            timebin_metrics_path = timebin_metrics_path.replace('_nor_filtered_metrics', '_nor_filtered_normalised_metrics')
+            timebin_metrics_path = timebin_metrics_path.replace('.csv', '_normalised.csv')
 
         timebin_metrics_df = pd.read_csv(timebin_metrics_path)
         timebin_metrics_df['timebin_size'] = int(timebin_size)
@@ -52,11 +55,11 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
         label_font_size=13, fig=None)
 
     if normalisation:
-        fig.suptitle(f'DCI ischemia: BP metrics over timebins (normalized/noradrenaline filtered)', fontsize=16, y=0.9)
-        fig_name = 'DCI_ischemia_bp_metrics_over_timebins_nor_filter_normalised.png'
+        fig.suptitle(f'DCI ischemia: BP metrics over timebins (normalized/noradrenaline {noradrenaline_handling})', fontsize=16, y=0.9)
+        fig_name = f'DCI_ischemia_bp_metrics_over_timebins_nor_{noradrenaline_handling}_normalised.png'
     else:
-        fig_name = 'DCI_ischemia_bp_metrics_over_timebins_nor_filter.png'
-        fig.suptitle(f'DCI ischemia: BP metrics over timebins (not normalized/noradrenaline filtered)', fontsize=16, y=0.9)
+        fig_name = f'DCI_ischemia_bp_metrics_over_timebins_nor_{noradrenaline_handling}.png'
+        fig.suptitle(f'DCI ischemia: BP metrics over timebins (not normalized/noradrenaline {noradrenaline_handling})', fontsize=16, y=0.9)
 
     if use_qvalues:
         fig_name = fig_name.replace('.png', '_qvalues.png')

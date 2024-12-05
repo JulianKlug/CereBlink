@@ -13,7 +13,7 @@ import rpy2.robjects as ro
 
 
 def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'max'],
-                     bp_metrics=['systole', 'diastole', 'mitteldruck'], use_R=False):
+                     bp_metrics=['systole', 'diastole', 'mitteldruck'], pid_column='pNr', use_R=False):
     # combination of bp_metrics and metrics_over_time
     timebin_metrics = [f'{bp_metric}_{metric_over_time}' for bp_metric in bp_metrics for metric_over_time in metrics_over_time]
 
@@ -28,12 +28,19 @@ def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'ma
         r_model_warnings_df = pd.DataFrame(columns=['metric', 'warning'])
 
         for metric in tqdm(timebin_metrics, total=len(timebin_metrics)):
-            metric_df = timebin_metrics_df[[metric, 'label', 'pNr']]
+            metric_df = timebin_metrics_df[[metric, 'label', pid_column]]
             n_inf = (metric_df[metric] == np.inf).sum() + (metric_df[metric] == -np.inf).sum()
             n_nan = metric_df[metric].isna().sum()
             # drop inf and nan values
             metric_df.dropna(subset=[metric], inplace=True)
             metric_df = metric_df[~metric_df[metric].isin([np.inf, -np.inf])]
+
+            # if metric_df is empty
+            if metric_df.shape[0] == 0:
+                print(f'Warning: Empty dataframe for metric {metric}')
+                r_pvals_per_metric[metric] = 1
+                r_model_warnings_df = pd.concat(
+                    [r_model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': ['Empty dataframe']})])
 
             if n_inf > 0:
                 print(f'Warning: {n_inf} inf values in metric {metric}')
@@ -45,7 +52,7 @@ def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'ma
 
             # lmc = ro.r(f'lmerControl({"optCtrl = list(ftol_abs=1e-15, xtol_abs=1e-15)"})')
             try:
-                model = lmerT.lmer(f"label  ~ {metric}  + (1|pNr)",
+                model = lmerT.lmer(f"label  ~ {metric}  + (1|{pid_column})",
                                data=metric_r_df)
                 coeffs = base.summary(model).rx2('coefficients')
                 indices = np.asarray(list(coeffs.names)[0])
@@ -63,18 +70,18 @@ def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'ma
                     r_model_warnings_df = pd.concat(
                         [r_model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': [warnings]})])
             # Catch non definite VtV (happens when there is not enough variance in the random effect, ie single sample in pos. class
-            except Exception as e:
+            except Exception as exception:
                 accepted_errors = ['Erreur dans eval_f(x, ...) : Downdated VtV is not positive definite\n',
                                      'Erreur dans asMethod(object) : not a positive definite matrix\n',
                                    'Erreur dans devfun(theta) : Downdated VtV is not positive definite\n']
-                if (isinstance(e, RRuntimeError) and e.args[0] in accepted_errors):
+                if (isinstance(exception, RRuntimeError) and exception.args[0] in accepted_errors):
                     print(f'Error in metric: {metric}')
                     r_pvals_per_metric[metric] = 1
                     r_model_warnings_df = pd.concat(
                         [r_model_warnings_df, pd.DataFrame({'metric': [metric],
-                                                            'warning': [str(e) + ', n_pos=' + str(metric_df.label.sum())]})])
+                                                            'warning': [str(exception) + ', n_pos=' + str(metric_df.label.sum())]})])
                 else:
-                    raise e
+                    raise exception
 
         pvals_per_metric = r_pvals_per_metric
         model_warnings_df = r_model_warnings_df
@@ -85,9 +92,9 @@ def timebin_analysis(timebin_metrics_df, metrics_over_time=['median', 'min', 'ma
         pvals_per_metric = {}
         model_warnings_df = pd.DataFrame(columns=['metric', 'warning'])
         for metric in tqdm(timebin_metrics, total=len(timebin_metrics)):
-            metric_df = timebin_metrics_df[[metric, 'label', 'pNr']]
+            metric_df = timebin_metrics_df[[metric, 'label', pid_column]]
             metric_df.dropna(subset=[metric], inplace=True)
-            model = Lmer(f"label  ~ {metric}  + (1|pNr)",
+            model = Lmer(f"label  ~ {metric}  + (1|{pid_column})",
                          data=metric_df, family='binomial')
             model.fit(control="optimizer='Nelder_Mead'")
 

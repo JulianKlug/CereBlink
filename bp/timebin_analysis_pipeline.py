@@ -9,7 +9,7 @@ assert int(pd.__version__[0]) >= 2, 'Ensure CereBlink env is used (and not annot
 
 
 def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handling='filter', normalisation=False,
-                            bp_metrics=['systole', 'diastole', 'mitteldruck'],
+                            bp_metrics=['systole', 'diastole', 'mitteldruck'], pid_column='pNr',
                            timebin_hours=None,
                            use_R=True):
     overall_stats = pd.DataFrame()
@@ -31,6 +31,8 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
 
         if noradrenaline_handling == 'filter':
             timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_nor_filtered.csv')
+        elif noradrenaline_handling is None:
+            timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h.csv')
         else:
             raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
 
@@ -43,7 +45,7 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
             print(f'Error reading {timebin_bp_path}')
             continue
 
-        timebin_metrics_df, timebin_creation_log_df = bp_timebin_metrics(timebin_bp_df, normalisation=normalisation, verbose=verbose)
+        timebin_metrics_df, timebin_creation_log_df = bp_timebin_metrics(timebin_bp_df, normalisation=normalisation, verbose=verbose, pid_column=pid_column)
         metrics_over_time = [col.split('_')[-1] for col in timebin_metrics_df.columns[timebin_metrics_df.columns.str.startswith(bp_metrics[0])]]
         timebin_metrics_df['timebin_size'] = int(timebin_size)
 
@@ -58,6 +60,7 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
 
         timebin_pvals_per_metric_df = timebin_analysis(timebin_metrics_df,
                                                        metrics_over_time=metrics_over_time, bp_metrics=bp_metrics,
+                                                       pid_column=pid_column,
                                                         use_R=use_R)
         timebin_pvals_per_metric_df['timebin_size'] = int(timebin_size)
         timebin_pvals_per_metric_df['noradrenaline_handling'] = noradrenaline_handling
@@ -89,12 +92,16 @@ if __name__ == '__main__':
     parser.add_argument('-N', '--normalisation', action='store_true')
     parser.add_argument('-r', '--use_R', action='store_true')
     parser.add_argument('-t', '--timebin_hours', type=int, required=True, nargs='+', help='List of timebin hours')
-
+    parser.add_argument('-pid', '--pid_column', type=str, default='pNr')
 
     args = parser.parse_args()
+
+    if args.noradrenaline_handling in ['None', 'none', '0']:
+        args.noradrenaline_handling = None
 
     multi_timebin_analysis(args.input_folder, verbose=args.verbose, noradrenaline_handling=args.noradrenaline_handling,
                            normalisation=args.normalisation,
                             bp_metrics=['systole', 'diastole', 'mitteldruck'],
+                            pid_column=args.pid_column,
                             timebin_hours=args.timebin_hours,
                            use_R=args.use_R)
