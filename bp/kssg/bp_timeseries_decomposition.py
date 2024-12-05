@@ -112,10 +112,10 @@ def bp_timeseries_decomposition(registry_data_path, bp_data_path, registry_corre
     # Label positive timebins
     # loop through all events and label bp data with event
     for index, row in target_events_df.iterrows():
-        # verify that patient is in pupillometry data
+        # verify that patient is in bp data
         if not row['pNr'] in bp_df['pNr'].values:
             if verbose:
-                print(f'Patient {row["Name"]} not in pupillometry data')
+                print(f'Patient {row["Name"]} not in bp data')
             continue
 
         timebin_begin = pd.to_datetime(row['full_date_target']) - pd.Timedelta(hours=timebin_hours, unit='h')

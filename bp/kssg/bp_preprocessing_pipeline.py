@@ -2,8 +2,8 @@ import os
 import getpass
 
 import pandas as pd
-from bp.bp_timeseries_decomposition import bp_timeseries_decomposition
-from bp.noradrenaline_preprocessing import annotate_concomitant_noradrenaline, filter_out_concomitant_noradrenaline
+from bp.kssg.bp_timeseries_decomposition import bp_timeseries_decomposition
+from bp.kssg.noradrenaline_preprocessing import annotate_concomitant_noradrenaline, filter_out_concomitant_noradrenaline
 from bp.normalisation import parallel_normalise
 from utils.utils import ensure_dir
 
