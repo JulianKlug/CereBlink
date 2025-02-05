@@ -23,16 +23,21 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
         timebin_folder_path = os.path.join(input_folder, timebin_folder)
         timebin_size = int(timebin_folder.split('_')[-1][:-1])
 
+        target_file_start = f'bp_timebins_{timebin_size}h'
         if noradrenaline_handling == 'filter':
-            timebin_metrics_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_nor_filtered_metrics.csv')
+            target_file_start = f'bp_timebins_{timebin_size}h_nor_filtered'
         elif noradrenaline_handling is None:
-            timebin_metrics_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_metrics.csv')
+            target_file_start = f'bp_timebins_{timebin_size}h'
         else:
             raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
 
+        target_file_ending = 'metrics.csv'
         if normalisation:
-            timebin_metrics_path = timebin_metrics_path.replace('_metrics', '_normalised_metrics')
-            timebin_metrics_path = timebin_metrics_path.replace('.csv', '_normalised.csv')
+            target_file_ending = target_file_ending.replace('.csv', '_normalised.csv')
+
+        # search for the file ending with metrics_normalised.csv
+        timebin_metrics_path = next((os.path.join(timebin_folder_path, f) for f in os.listdir(timebin_folder_path) if
+                             (f.endswith(target_file_ending)) and f.startswith(target_file_start)), None)
 
         timebin_metrics_df = pd.read_csv(timebin_metrics_path)
         timebin_metrics_df['timebin_size'] = int(timebin_size)

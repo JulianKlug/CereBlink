@@ -9,6 +9,7 @@ assert int(pd.__version__[0]) >= 2, 'Ensure CereBlink env is used (and not annot
 
 
 def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handling='filter', normalisation=False,
+                           create_timebin_metrics=True,
                             bp_metrics=['systole', 'diastole', 'mitteldruck'], pid_column='pNr',
                            timebin_hours=None,
                            use_R=True):
@@ -29,34 +30,46 @@ def multi_timebin_analysis(input_folder:str, verbose=False, noradrenaline_handli
         if verbose:
             print(f'Analyzing timebin {timebin_size}h')
 
-        if noradrenaline_handling == 'filter':
-            timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_nor_filtered.csv')
-        elif noradrenaline_handling is None:
-            timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h.csv')
+        if create_timebin_metrics:
+            if noradrenaline_handling == 'filter':
+                timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h_nor_filtered.csv')
+            elif noradrenaline_handling is None:
+                timebin_bp_path = os.path.join(timebin_folder_path, f'bp_timebins_{timebin_size}h.csv')
+            else:
+                raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
+
+            if normalisation:
+                timebin_bp_path = timebin_bp_path.replace('.csv', '_normalised.csv')
+
+            try:
+                timebin_bp_df = pd.read_csv(timebin_bp_path)
+            except:
+                print(f'Error reading {timebin_bp_path}')
+                continue
+
+            timebin_metrics_df, timebin_creation_log_df = bp_timebin_metrics(timebin_bp_df, normalisation=normalisation, verbose=verbose, pid_column=pid_column)
+            timebin_metrics_df['timebin_size'] = int(timebin_size)
+
+            timebin_metrics_path = timebin_bp_path.replace('.csv', '_metrics.csv')
+            if normalisation:
+                timebin_metrics_path = timebin_metrics_path.replace('.csv', '_normalised.csv')
+
+            timebin_metrics_df.to_csv(timebin_metrics_path, index=False)
+            timebin_creation_log_df.to_csv(os.path.join(timebin_folder_path, 'logs',
+                                                        f'timebin_creation_log_{timebin_size}h_nor_{noradrenaline_handling}{"_normalised" if normalisation else ""}.csv'),
+                                           index=False)
         else:
-            raise NotImplementedError(f'Noradrenaline handling {noradrenaline_handling} not implemented')
+            target_file_ending = 'metrics.csv'
+            if normalisation:
+                target_file_ending = 'metrics_normalised.csv'
+            # search for the file ending with metrics_normalised.csv
+            metrics_file = next((os.path.join(timebin_folder_path, f) for f in os.listdir(timebin_folder_path) if
+                                      f.endswith(target_file_ending)), None)
 
-        if normalisation:
-            timebin_bp_path = timebin_bp_path.replace('.csv', '_normalised.csv')
+            timebin_metrics_df = pd.read_csv(metrics_file)
 
-        try:
-            timebin_bp_df = pd.read_csv(timebin_bp_path)
-        except:
-            print(f'Error reading {timebin_bp_path}')
-            continue
-
-        timebin_metrics_df, timebin_creation_log_df = bp_timebin_metrics(timebin_bp_df, normalisation=normalisation, verbose=verbose, pid_column=pid_column)
-        metrics_over_time = [col.split('_')[-1] for col in timebin_metrics_df.columns[timebin_metrics_df.columns.str.startswith(bp_metrics[0])]]
-        timebin_metrics_df['timebin_size'] = int(timebin_size)
-
-        timebin_metrics_path = timebin_bp_path.replace('.csv', '_metrics.csv')
-        if normalisation:
-            timebin_metrics_path = timebin_metrics_path.replace('.csv', '_normalised.csv')
-
-        timebin_metrics_df.to_csv(timebin_metrics_path, index=False)
-        timebin_creation_log_df.to_csv(os.path.join(timebin_folder_path, 'logs',
-                                                    f'timebin_creation_log_{timebin_size}h_nor_{noradrenaline_handling}{"_normalised" if normalisation else ""}.csv'),
-                                       index=False)
+        metrics_over_time = [col.split('_')[-1] for col in
+                             timebin_metrics_df.columns[timebin_metrics_df.columns.str.startswith(bp_metrics[0])]]
 
         timebin_pvals_per_metric_df = timebin_analysis(timebin_metrics_df,
                                                        metrics_over_time=metrics_over_time, bp_metrics=bp_metrics,
@@ -90,6 +103,7 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbose', action='store_true')
     parser.add_argument('-nor', '--noradrenaline_handling', type=str, default='filter')
     parser.add_argument('-N', '--normalisation', action='store_true')
+    parser.add_argument('-k', '--do_not_recreate_metrics', action='store_false', dest='create_timebin_metrics')
     parser.add_argument('-r', '--use_R', action='store_true')
     parser.add_argument('-t', '--timebin_hours', type=int, required=True, nargs='+', help='List of timebin hours')
     parser.add_argument('-pid', '--pid_column', type=str, default='pNr')
@@ -101,6 +115,7 @@ if __name__ == '__main__':
 
     multi_timebin_analysis(args.input_folder, verbose=args.verbose, noradrenaline_handling=args.noradrenaline_handling,
                            normalisation=args.normalisation,
+                            create_timebin_metrics=args.create_timebin_metrics,
                             bp_metrics=['systole', 'diastole', 'mitteldruck'],
                             pid_column=args.pid_column,
                             timebin_hours=args.timebin_hours,
