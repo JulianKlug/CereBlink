@@ -3,6 +3,11 @@ from sklearn.metrics import roc_curve, roc_auc_score, matthews_corrcoef, accurac
     multilabel_confusion_matrix, brier_score_loss, confusion_matrix
 import numpy as np
 
+def safe_roc_auc_score(y_true, y_score):
+    if len(np.unique(y_true)) == 1:
+        return np.nan
+    return roc_auc_score(y_true, y_score)
+
 def bootstrapped_roc_auc(y, y_pred, n_bootstraps=1000, random_seed=42):
     '''Calculate bootstrapped ROC AUC
 
