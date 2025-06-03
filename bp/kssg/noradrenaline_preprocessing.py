@@ -93,7 +93,7 @@ if __name__ == '__main__':
     parser.add_argument('--nor', type=str, help='Path to noradrenaline data')
     args = parser.parse_args()
 
-    bp_df = pd.read_csv(args.bp)
+    bp_df = pd.read_csv(args.bp, sep=';', decimal='.')
     nor_df = pd.read_csv(args.nor, sep=';', decimal='.')
 
     annotated_bp_df = annotate_concomitant_noradrenaline(bp_df, nor_df)
