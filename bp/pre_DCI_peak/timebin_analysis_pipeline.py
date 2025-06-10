@@ -1,8 +1,8 @@
 import os
 import pandas as pd
 
-from bp.bp_timebin_metrics import bp_timebin_metrics
-from bp.bp_timebin_stats import timebin_analysis
+from bp.pre_DCI_peak.bp_timebin_metrics import bp_timebin_metrics
+from bp.pre_DCI_peak.bp_timebin_stats import timebin_analysis
 
 assert int(pd.__version__[0]) >= 2, 'Ensure CereBlink env is used (and not annotations)'
 

@@ -2,7 +2,7 @@ import os
 import pandas as pd
 
 from bp.foch.foch_bp_timeseries_decomposition import foch_bp_timeseries_decomposition
-from bp.normalisation import parallel_normalise
+from bp.preprocessing.normalisation import parallel_normalise
 from utils.utils import ensure_dir
 
 
