@@ -1,6 +1,11 @@
 import pandas as pd
 from tqdm import tqdm
 import scipy.stats as stats
+import statsmodels.api as sm
+import numpy as np
+import os
+os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Versions/4.1/Resources"
+from pymer4.models import Lmer
 
 
 def define_events_over_intensity_thresholds(df, intensity_threshold, parameter_name='systole', relative_time_column='relative_time'):
@@ -186,3 +191,128 @@ def event_product_to_mrs_correlation(events_df):
             })
     
     return pd.DataFrame(correlation_results)
+
+
+def event_count_to_DCI_coefficient(events_df, DCI_column='DCI_YN_verified'):
+    """
+    Compute the logistic regression coefficient between event counts and DCI_YN_verified for each intensity and duration threshold.
+    Arguments:
+        - events_df: DataFrame with event counts
+        - DCI_column: column name for DCI_YN_verified (default is 'DCI_YN_verified')
+    Returns: coefficient_df
+    """
+    coefficient_results = []
+    
+    for (intensity_threshold, duration_threshold), group in events_df.groupby(['intensity_threshold', 'duration_threshold']):
+        temp_df = group.copy()
+        temp_df.dropna(subset=['event_count', DCI_column], inplace=True)
+        
+        # Skip if too few data points
+        if len(temp_df) <= 1:
+            continue
+            
+        # Check for zero variance
+        if temp_df['event_count'].std() == 0:
+            continue
+            
+        try:
+            log_model = sm.Logit(temp_df[DCI_column],
+                                 sm.add_constant(temp_df['event_count']))
+            log_model_result = log_model.fit(disp=0, method='bfgs')  # Try different solver
+            coefficient_results.append({
+                'intensity_threshold': intensity_threshold,
+                'duration_threshold': duration_threshold,
+                'coefficient': log_model_result.params['event_count'],
+                'p_value': log_model_result.pvalues['event_count'],
+                'n_samples': len(temp_df)
+            })
+        except Exception as e:
+            print(f"Error at threshold {intensity_threshold}/{duration_threshold}: {e}")
+
+    
+    return pd.DataFrame(coefficient_results)
+
+
+def event_product_to_DCI_coefficient(events_df, DCI_column='DCI_YN_verified', use_mixed_effects=False):
+    """
+    Compute the logistic regression coefficient between event product and DCI_YN_verified for each intensity and duration threshold.
+    
+    Arguments:
+        - events_df: DataFrame with event products
+        - DCI_column: column name for DCI_YN_verified (default is 'DCI_YN_verified')
+    
+    Returns: coefficient_df
+    """
+    coefficient_results = []
+    
+    for (intensity_threshold, duration_threshold), group in events_df.groupby(['intensity_threshold', 'duration_threshold']):
+        temp_df = group.copy()
+        temp_df.dropna(subset=['event_product', DCI_column], inplace=True)
+        
+        # Skip if too few data points
+        if len(temp_df) <= 1:
+            continue
+            
+        # Check for zero variance
+        if temp_df['event_product'].std() == 0:
+            continue
+
+        # rescale event_product by mean and standard deviation
+        temp_df['event_product'] = (temp_df['event_product'] - temp_df['event_product'].mean()) / temp_df['event_product'].std()
+
+            
+        try:
+            if not use_mixed_effects:
+                log_model = sm.Logit(temp_df[DCI_column],
+                                    sm.add_constant(temp_df['event_product']))
+                log_model_result = log_model.fit(disp=0, method='bfgs')  # Try different solver
+                coefficient = log_model_result.params['event_product']
+                p_value = log_model_result.pvalues['event_product']
+            else:
+                from rpy2.robjects.packages import importr
+                from rpy2.robjects import pandas2ri
+                import rpy2.robjects as ro
+
+                stats = importr('stats')
+                lme4 = importr('lme4')
+                base = importr('base')
+                lmerT = importr('lmerTest')
+
+
+                with (ro.default_converter + pandas2ri.converter).context():
+                    metric_r_df = ro.conversion.get_conversion().py2rpy(temp_df)
+                metric = 'event_product'
+
+                model = lmerT.lmer(f"{DCI_column}  ~ {metric}  + (1|pNr)",
+                                data=metric_r_df)
+                coeffs = base.summary(model).rx2('coefficients')
+                indices = np.asarray(list(coeffs.names)[0])
+                column_names = np.asarray(list(coeffs.names)[1])
+
+                with (ro.default_converter + pandas2ri.converter).context():
+                    coeffs_df = pd.DataFrame(ro.conversion.get_conversion().rpy2py(coeffs),
+                                                index=indices, columns=column_names)
+
+                warnings = base.summary(model).rx2('warnings')
+                # check if warnings is null
+                if warnings != ro.rinterface.NULL:
+                    # r_model_warnings_df = pd.concat(
+                    #     [r_model_warnings_df, pd.DataFrame({'metric': [metric], 'warning': [warnings]})])
+                    print(f"Warning for treshold {intensity_threshold}/{duration_threshold}: {warnings}")
+
+                coefficient = coeffs_df.loc[metric, 'Estimate']
+                p_value = coeffs_df.loc[metric, 'Pr(>|t|)']
+
+
+            coefficient_results.append({
+                'intensity_threshold': intensity_threshold,
+                'duration_threshold': duration_threshold,
+                'coefficient': coefficient,
+                'p_value': p_value,
+                'n_samples': len(temp_df)
+            })
+        except Exception as e:
+            print(f"Error at threshold {intensity_threshold}/{duration_threshold}: {e}")
+
+    
+    return pd.DataFrame(coefficient_results)
