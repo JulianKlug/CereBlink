@@ -2,6 +2,7 @@ import pandas as pd
 from tqdm import tqdm
 import scipy.stats as stats
 import statsmodels.api as sm
+from statsmodels.miscmodels.ordinal_model import OrderedModel
 import numpy as np
 import os
 os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Versions/4.1/Resources"
@@ -135,6 +136,24 @@ def count_events(events_df):
     return counts_df
 
 
+def total_event_duration(events_df):
+    """
+    Compute the total event duration for each pNr, intensity threshold, and duration threshold.
+        - construct a DataFrame with total event duration for each pnr and intensity threshold and duration threshold
+        - keep the columns: pNr, intensity_threshold, duration_threshold, total_event_duration, DCI_YN_verified, mrs_1y
+
+    Arguments:
+        - events_df: DataFrame with events
+
+    Returns: duration_df
+    """
+    duration_df = events_df.groupby(['pNr', 'intensity_threshold', 'duration_threshold']).agg(
+                                    total_event_duration=('event_duration', 'sum'),
+                                    DCI_YN_verified=('DCI_YN_verified', 'first'),
+                                    mrs_1y=('mrs_1y', 'first')).reset_index()
+    return duration_df
+
+
 # for every intensity threshold and duration trheshold combination, compute the pearson correlation coefficient between number of events and mRS_1y
 def event_count_to_mrs_correlation(events_df):
     """
@@ -192,6 +211,31 @@ def event_product_to_mrs_correlation(events_df):
     
     return pd.DataFrame(correlation_results)
 
+
+def event_relative_duration_to_mrs_correlation(events_df, relative_duration_column='total_event_duration_proportion'):
+    """
+    Compute the Pearson correlation coefficient between event relative duration and mRS_1y for each intensity and duration threshold.
+
+    Arguments:
+        - events_df: DataFrame with event relative durations
+
+    Returns: correlation_df
+    """
+    correlation_results = []
+    for (intensity_threshold, duration_threshold), group in events_df.groupby(['intensity_threshold', 'duration_threshold']):
+        temp_df = group.copy()
+        temp_df.dropna(subset=[relative_duration_column, 'mrs_1y'], inplace=True)
+        if temp_df.empty:
+            continue
+        if len(temp_df) > 1:
+            corr, p_value = stats.pearsonr(temp_df[relative_duration_column], temp_df['mrs_1y'])
+            correlation_results.append({
+                'intensity_threshold': intensity_threshold,
+                'duration_threshold': duration_threshold,
+                'correlation_coefficient': corr,
+                'p_value': p_value
+            })
+    return pd.DataFrame(correlation_results)
 
 def event_count_to_DCI_coefficient(events_df, DCI_column='DCI_YN_verified'):
     """
@@ -316,3 +360,230 @@ def event_product_to_DCI_coefficient(events_df, DCI_column='DCI_YN_verified', us
 
     
     return pd.DataFrame(coefficient_results)
+
+
+def total_correlated_event_counts(event_counts_df, correlation_df):
+    """
+    Calculate the total number of positively and negatively correlated events.
+    """
+    
+
+    event_counts_df['positively_correlated'] = 0
+    event_counts_df['negatively_correlated'] = 0
+    for idx, row in correlation_df.iterrows():
+        if row['correlation_coefficient'] > 0:
+            event_counts_df.loc[
+                (event_counts_df['intensity_threshold'] == row['intensity_threshold']) &
+                (event_counts_df['duration_threshold'] == row['duration_threshold']),
+                'positively_correlated'] = 1
+        elif row['correlation_coefficient'] < 0:
+            event_counts_df.loc[
+                (event_counts_df['intensity_threshold'] == row['intensity_threshold']) &
+                (event_counts_df['duration_threshold'] == row['duration_threshold']),
+                'negatively_correlated'] = 1
+            
+    event_counts_df['positively_correlated_event_count'] = event_counts_df['positively_correlated'] * event_counts_df['event_count']
+    event_counts_df['negatively_correlated_event_count'] = event_counts_df['negatively_correlated'] * event_counts_df['event_count']
+    
+    return event_counts_df.groupby('pNr').agg({
+            'positively_correlated_event_count': 'sum',
+            'negatively_correlated_event_count': 'sum',
+            'DCI_YN_verified': 'first',
+            'mrs_1y': 'first'
+        }).reset_index()
+
+def total_correlated_event_duration(event_df, correlation_df, threshold=0):
+    """
+    Calculate the total number of positively and negatively correlated events.
+    """
+    if 'correlation_coefficient' in correlation_df.columns:
+        coefficient_name = 'correlation_coefficient'
+    elif 'coefficient' in correlation_df.columns:
+        coefficient_name = 'coefficient'
+    else:
+        raise ValueError("correlation_df must contain either 'correlation_coefficient' or 'coefficient' column.")
+    
+    event_df['positively_correlated'] = 0
+    event_df['negatively_correlated'] = 0
+    for idx, row in correlation_df.iterrows():
+        if row[coefficient_name] > threshold:
+            event_df.loc[
+                (event_df['intensity_threshold'] == row['intensity_threshold']) &
+                (event_df['duration_threshold'] == row['duration_threshold']),
+                'positively_correlated'] = 1
+        elif row[coefficient_name] < -1 * threshold:
+            event_df.loc[
+                (event_df['intensity_threshold'] == row['intensity_threshold']) &
+                (event_df['duration_threshold'] == row['duration_threshold']),
+                'negatively_correlated'] = 1
+            
+    event_df['positively_correlated_event_duration'] = event_df['positively_correlated'] * event_df['event_duration']
+    event_df['negatively_correlated_event_duration'] = event_df['negatively_correlated'] * event_df['event_duration']
+
+    return event_df.groupby('pNr').agg({
+            'positively_correlated_event_duration': 'sum',
+            'negatively_correlated_event_duration': 'sum',
+            'DCI_YN_verified': 'first',
+            'mrs_1y': 'first'
+        }).reset_index()
+
+
+
+def relative_duration_in_correlated_events(duration_thresholded_events_df, event_count_correlation_df, monitoring_duration_df, threshold=0):
+    no_duplicates_duration_thresholded_events_df = duration_thresholded_events_df.groupby(['pNr', 'event_id']).agg({
+    'parameter_name': 'first',
+    'event_first_measure_rel_time': 'first',
+    'event_last_measure_rel_time': 'first',
+    'event_duration': 'max',
+    'event_product': 'max',
+    'intensity_threshold': 'max',
+    'duration_threshold': 'max',
+    'DCI_YN_verified': 'first',
+    'mrs_1y': 'first'
+    }).reset_index()
+
+    event_duration_with_correlation_df = total_correlated_event_duration(no_duplicates_duration_thresholded_events_df, event_count_correlation_df,
+                                                                                        threshold=threshold)
+
+    event_duration_with_correlation_df = event_duration_with_correlation_df.merge(
+        monitoring_duration_df[['pNr', 'monitoring_duration']],
+        on='pNr',
+        how='left'
+    )
+
+    event_duration_with_correlation_df['positively_correlated_event_proportion_of_monitoring_duration'] = event_duration_with_correlation_df['positively_correlated_event_duration'] / event_duration_with_correlation_df['monitoring_duration']
+    event_duration_with_correlation_df['negatively_correlated_event_proportion_of_monitoring_duration'] = event_duration_with_correlation_df['negatively_correlated_event_duration'] / event_duration_with_correlation_df['monitoring_duration']
+
+    return event_duration_with_correlation_df
+
+
+def decision_boundary_analysis(duration_thresholded_events_df, event_count_correlation_df, monitoring_duration_df, covariate_df, 
+                               correlation_threshold=0,
+                                       outcome='mrs_1y', reg_type='ordinal',
+                                       multivariable=True, verbose=False):
+    """
+    Uni and multivariable analysis of decision boundary (proportion of duration in positively or negatively correlated zone)
+
+    Arguments:
+    duration_thresholded_events_df : DataFrame
+        DataFrame containing duration thresholded events.
+    event_count_correlation_df : DataFrame
+        DataFrame containing event count correlations.
+    monitoring_duration_df : DataFrame
+        DataFrame containing monitoring durations.
+    covariate_df : DataFrame
+        DataFrame containing covariates.
+    correlation_threshold : float
+        The correlation threshold to use.
+    outcome : str
+        The outcome variable to analyze.
+    reg_type : str
+        The type of regression to use ('ordinal' or 'log').
+    multivariable : bool
+        Whether to include multivariable analysis.
+    verbose : bool
+        Whether to print detailed output.
+    Returns:
+    pos_event_duration_result : statsmodels result object
+    neg_event_duration_result : statsmodels result object
+    pos_event_duration_result_multivariable : statsmodels result object or None
+    neg_event_duration_result_multivariable : statsmodels result object or None
+    """
+    relative_duration_in_correlated_events_df = relative_duration_in_correlated_events(
+        duration_thresholded_events_df,
+        event_count_correlation_df,
+        monitoring_duration_df,
+        threshold=correlation_threshold
+    )
+
+    # Univariate association of duration with mRS_1y (ordinal regression)
+    temp_df = relative_duration_in_correlated_events_df[['positively_correlated_event_proportion_of_monitoring_duration', 'negatively_correlated_event_proportion_of_monitoring_duration', outcome]].dropna()
+
+    if reg_type == 'ordinal': 
+        pos_event_duration_model = OrderedModel(
+            temp_df[outcome],
+            temp_df[['positively_correlated_event_proportion_of_monitoring_duration']],
+            distr='logit'
+        )
+        neg_event_duration_model = OrderedModel(
+            temp_df[outcome],
+            temp_df[['negatively_correlated_event_proportion_of_monitoring_duration']],
+            distr='logit'
+        )
+        pos_event_duration_result = pos_event_duration_model.fit(method='bfgs')
+        neg_event_duration_result = neg_event_duration_model.fit(method='bfgs')
+
+
+    elif reg_type == 'log':
+        pos_event_duration_model = sm.Logit(temp_df[outcome],
+                                    sm.add_constant(temp_df[['positively_correlated_event_proportion_of_monitoring_duration']]))
+        pos_event_duration_result = pos_event_duration_model.fit(disp=0, method='bfgs')  
+
+        neg_event_duration_model = sm.Logit(temp_df[outcome],
+                                    sm.add_constant(temp_df[['negatively_correlated_event_proportion_of_monitoring_duration']]))
+        neg_event_duration_result = neg_event_duration_model.fit(disp=0, method='bfgs')  
+
+    else:
+        raise ValueError(f'Unsupported regression type: {reg_type}. Supported types are "ordinal" and "log".')
+
+    if verbose:
+        print("Positive Event Duration Model Summary:")
+        print(pos_event_duration_result.summary())
+        print("Negative Event Duration Model Summary:")
+        print(neg_event_duration_result.summary())
+
+    # Mulivariable
+    if multivariable:
+        # mutlivariable model with Age, WFNS, Fisher_Score, Coiling, Clipping
+        temp_df = relative_duration_in_correlated_events_df.merge(
+            covariate_df[['pNr', 'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']],
+            on='pNr',
+            how='left'
+        )
+        temp_df = temp_df[['positively_correlated_event_proportion_of_monitoring_duration',
+                        'negatively_correlated_event_proportion_of_monitoring_duration',
+                        outcome, 'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']].dropna()
+
+        temp_df['Age'] = pd.to_numeric(temp_df['Age'], errors='coerce')
+        temp_df['WFNS'] = pd.to_numeric(temp_df['WFNS'], errors='coerce')
+        temp_df['Fisher_Score'] = pd.to_numeric(temp_df['Fisher_Score'], errors='coerce')
+        temp_df['Coiling'] = pd.to_numeric(temp_df['Coiling'], errors='coerce')
+        temp_df['Clipping'] = pd.to_numeric(temp_df['Clipping'], errors='coerce')
+
+        if reg_type == 'ordinal':
+            pos_event_duration_model_multivariable = OrderedModel(
+                temp_df[outcome],
+                temp_df[['positively_correlated_event_proportion_of_monitoring_duration',
+                        'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']],
+                distr='logit'
+            )
+            neg_event_duration_model_multivariable = OrderedModel(
+                temp_df[outcome],
+                temp_df[['negatively_correlated_event_proportion_of_monitoring_duration',
+                        'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']],
+                distr='logit'
+            )
+            pos_event_duration_result_multivariable = pos_event_duration_model_multivariable.fit(method='bfgs')
+            neg_event_duration_result_multivariable = neg_event_duration_model_multivariable.fit(method='bfgs')
+        elif reg_type == 'log':
+            pos_event_duration_model_multivariable = sm.Logit(temp_df[outcome],
+                                    sm.add_constant(temp_df[['positively_correlated_event_proportion_of_monitoring_duration',
+                                                            'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']]))
+            pos_event_duration_result_multivariable = pos_event_duration_model_multivariable.fit(disp=0, method='bfgs')  
+
+            neg_event_duration_model_multivariable = sm.Logit(temp_df[outcome],
+                                    sm.add_constant(temp_df[['negatively_correlated_event_proportion_of_monitoring_duration',
+                                                            'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']]))
+            neg_event_duration_result_multivariable = neg_event_duration_model_multivariable.fit(disp=0, method='bfgs')
+        else:
+            raise ValueError(f'Unsupported regression type: {reg_type}. Supported types are "ordinal" and "log".')
+        
+        if verbose:
+            print("Positive Event Duration Multivariable Model Summary:")
+            print(pos_event_duration_result_multivariable.summary())
+            print("Negative Event Duration Multivariable Model Summary:")
+            print(neg_event_duration_result_multivariable.summary())
+
+        return pos_event_duration_result, neg_event_duration_result, pos_event_duration_result_multivariable, neg_event_duration_result_multivariable
+    else: 
+        return pos_event_duration_result, neg_event_duration_result, None, None
