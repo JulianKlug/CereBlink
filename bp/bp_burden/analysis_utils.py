@@ -605,13 +605,16 @@ def save_decision_boundary_analysis_results_to_csv(decision_boundary_results, ou
     save_regression_analysis_results_to_csv(neg_event_duration_result_multivariable, output_dir, f'{filename_root}_neg_event_duration_multivariable')
        
 
-def plot_event_correlation_heatmap(correlation_df: pd.DataFrame, coefficient_name: str = 'correlation_coefficient'):
+def plot_event_correlation_heatmap(correlation_df: pd.DataFrame, coefficient_name: str = 'correlation_coefficient', step_size:int = 10):
     fig, ax = plt.subplots(figsize=(12, 8))
+
+    annotations = True if step_size >= 10 else False
+
     ax = sns.heatmap(correlation_df.pivot_table(
         index='duration_threshold',
         columns='intensity_threshold',
         values=coefficient_name
     ).reindex(index=sorted(correlation_df['duration_threshold'].unique(), reverse=True)),
-        annot=True, cmap='seismic', center=0, ax=ax)
+        annot=annotations, cmap='seismic', center=0, ax=ax)
     
     return fig

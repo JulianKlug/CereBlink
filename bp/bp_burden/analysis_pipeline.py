@@ -34,7 +34,7 @@ def event_burden_analysis(working_df, intensity_threshold_range, intensity_thres
         association_df = event_count_to_DCI_coefficient(event_counts_df)
 
     # Create figure
-    fig = plot_event_correlation_heatmap(association_df, coefficient_name=coefficient_name)
+    fig = plot_event_correlation_heatmap(association_df, coefficient_name=coefficient_name, step_size=min(intensity_threshold_step, duration_step))
     fig.suptitle(f'{bp_parameter} event counts vs {outcome} in {period_name}')
     fig.savefig(os.path.join(output_dir, f'{bp_parameter}_event_counts_vs_{outcome}_in_{period_name}.png'), bbox_inches='tight', dpi=300)
     plt.close(fig)
