@@ -5,6 +5,8 @@ import statsmodels.api as sm
 from statsmodels.miscmodels.ordinal_model import OrderedModel
 import numpy as np
 import os
+import seaborn as sns
+import matplotlib.pyplot as plt
 os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Versions/4.1/Resources"
 from pymer4.models import Lmer
 
@@ -587,3 +589,29 @@ def decision_boundary_analysis(duration_thresholded_events_df, event_count_corre
         return pos_event_duration_result, neg_event_duration_result, pos_event_duration_result_multivariable, neg_event_duration_result_multivariable
     else: 
         return pos_event_duration_result, neg_event_duration_result, None, None
+    
+
+def save_regression_analysis_results_to_csv(regression_result, output_dir, filename_root):
+        fit_as_html = regression_result.summary().tables[0].as_html()
+        results_as_html = regression_result.summary().tables[1].as_html()
+        pd.read_html(fit_as_html, header=0, index_col=0)[0].to_csv(os.path.join(output_dir, f'{filename_root}_regression_fit.csv'))
+        pd.read_html(results_as_html, header=0, index_col=0)[0].to_csv(os.path.join(output_dir, f'{filename_root}_regression_results.csv')) 
+
+def save_decision_boundary_analysis_results_to_csv(decision_boundary_results, output_dir, filename_root):
+    pos_event_duration_result, neg_event_duration_result, pos_event_duration_result_multivariable, neg_event_duration_result_multivariable = decision_boundary_results
+    save_regression_analysis_results_to_csv(pos_event_duration_result, output_dir, f'{filename_root}_pos_event_duration')
+    save_regression_analysis_results_to_csv(neg_event_duration_result, output_dir, f'{filename_root}_neg_event_duration')
+    save_regression_analysis_results_to_csv(pos_event_duration_result_multivariable, output_dir, f'{filename_root}_pos_event_duration_multivariable')
+    save_regression_analysis_results_to_csv(neg_event_duration_result_multivariable, output_dir, f'{filename_root}_neg_event_duration_multivariable')
+       
+
+def plot_event_correlation_heatmap(correlation_df: pd.DataFrame, coefficient_name: str = 'correlation_coefficient'):
+    fig, ax = plt.subplots(figsize=(12, 8))
+    ax = sns.heatmap(correlation_df.pivot_table(
+        index='duration_threshold',
+        columns='intensity_threshold',
+        values=coefficient_name
+    ).reindex(index=sorted(correlation_df['duration_threshold'].unique(), reverse=True)),
+        annot=True, cmap='seismic', center=0, ax=ax)
+    
+    return fig
