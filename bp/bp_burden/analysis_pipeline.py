@@ -10,7 +10,8 @@ from bp.bp_burden.analysis_utils import count_events, define_events_multiple_thr
 
 def event_burden_analysis(working_df, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step, 
                           bp_parameter, outcome, period_name,
-                          output_dir, monitoring_duration_df, main_df, 
+                          output_dir, monitoring_duration_df, main_df,
+                          use_average_event_counts=False, 
                           verbose=False, correlation_threshold=0):
     if outcome == 'mrs_1y':
         reg_type = 'ordinal'
@@ -27,6 +28,9 @@ def event_burden_analysis(working_df, intensity_threshold_range, intensity_thres
                                                                     duration_thresholds=range(duration_range[0], duration_range[1] + 1, duration_step))
 
     event_counts_df = count_events(duration_thresholded_events_df)
+
+    if use_average_event_counts:
+        event_counts_df = event_counts_df.groupby(['mrs_1y', 'intensity_threshold', 'duration_threshold']).agg({'event_count': 'mean'}).reset_index()
 
     if outcome == 'mrs_1y':
         association_df = event_count_to_mrs_correlation(event_counts_df)
@@ -54,6 +58,7 @@ def bp_events_analysis_pipeline(
         outcome_data_path: str,
         output_dir: str,
         filter_noradrenaline: bool = False,
+        use_average_event_counts: bool = False,
         bp_parameter: str = 'systole',
         outcome: str = 'mrs_1y',
         intensity_threshold_range: tuple = (140, 220),
@@ -178,6 +183,7 @@ def bp_events_analysis_pipeline(
     _ = event_burden_analysis(working_df_in_first_24h_monitoring, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
                                     bp_parameter, outcome, 'first_24h',
                                     output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
 
     # analysis for 24h-to-end of monitoring
@@ -185,6 +191,7 @@ def bp_events_analysis_pipeline(
     _ = event_burden_analysis(working_df_after_24h_monitoring, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
                                     bp_parameter, outcome, 'after_24h',
                                     output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
 
     # before aneurysm treatment
@@ -192,6 +199,7 @@ def bp_events_analysis_pipeline(
     _ = event_burden_analysis(working_df_before_aneurym_secured, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
                                     bp_parameter, outcome, 'before_aneurysm_secured',
                                     output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
     
 
@@ -200,6 +208,7 @@ def bp_events_analysis_pipeline(
     _ = event_burden_analysis(working_df_after_aneurym_secured, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
                                     bp_parameter, outcome, 'after_aneurysm_secured',
                                     output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
     
 
@@ -210,6 +219,7 @@ def all_outcomes_bp_events_analysis_pipeline(
         outcome_data_path: str,
         output_dir: str,
         filter_noradrenaline: bool = False,
+        use_average_event_counts: bool = False,
         bp_parameter: str = 'systole',
         outcomes:  list = ['mrs_1y', 'DCI_YN_verified'],
         intensity_threshold_range: tuple = (140, 220),
@@ -236,6 +246,7 @@ def all_outcomes_bp_events_analysis_pipeline(
             outcome_data_path=outcome_data_path,
             output_dir=outcome_dir,
             filter_noradrenaline=filter_noradrenaline,
+            use_average_event_counts=use_average_event_counts,
             bp_parameter=bp_parameter,
             outcome=outcome,
             intensity_threshold_range=intensity_threshold_range,
@@ -264,6 +275,8 @@ if __name__ == '__main__':
                         help='Directory to save the output results.')
     parser.add_argument('--filter_noradrenaline', action='store_true',
                         help='Whether to filter out records with noradrenaline concomitant use.')
+    parser.add_argument('--use_average_event_counts', action='store_true',
+                        help='Whether to use average event counts instead of total counts for analysis.')
     parser.add_argument('--bp_parameter', type=str, default='systole',
                         choices=['systole', 'diastole', 'mitteldruck'],
                         help='Blood pressure parameter to analyze.')
@@ -296,6 +309,7 @@ if __name__ == '__main__':
         outcome_data_path=args.outcome_data_path,
         output_dir=args.output_dir,
         filter_noradrenaline=args.filter_noradrenaline,
+        use_average_event_counts=args.use_average_event_counts,
         bp_parameter=args.bp_parameter,
         outcomes=args.outcomes,
         intensity_threshold_range=tuple(args.intensity_threshold_range),
