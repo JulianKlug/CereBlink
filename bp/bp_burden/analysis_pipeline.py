@@ -134,7 +134,7 @@ def bp_events_analysis_pipeline(
 
     if restrict_to_DCI:
         # filter main_df to only include patients with DCI_YN_verified == 1
-        main_df = main_df[main_df['DCI_YN_verified']]
+        main_df = main_df[main_df['DCI_YN_verified'] == 1]
         if verbose:
             print(f'Restricted to DCI patients. Number of patients: {main_df["pNr"].nunique()}')
     
