@@ -58,6 +58,7 @@ def bp_events_analysis_pipeline(
         outcome_data_path: str,
         output_dir: str,
         filter_noradrenaline: bool = False,
+        restrict_to_DCI: bool = False,
         use_average_event_counts: bool = False,
         bp_parameter: str = 'systole',
         outcome: str = 'mrs_1y',
@@ -130,6 +131,12 @@ def bp_events_analysis_pipeline(
                         left_on=['SOS-CENTER-YEAR-NO.', 'JoinedName', 'Date_birth'], 
                         right_on=['SOS-CENTER-YEAR-NO.', 'Name', 'Date_birth'], 
                         how='left')
+
+    if restrict_to_DCI:
+        # filter main_df to only include patients with DCI_YN_verified == 1
+        main_df = main_df[main_df['DCI_YN_verified']]
+        if verbose:
+            print(f'Restricted to DCI patients. Number of patients: {main_df["pNr"].nunique()}')
     
     # compute timings
     main_df['Date_DCI_ischemia_first_image'] = pd.to_datetime(main_df['Date_DCI_ischemia_first_image'], errors='coerce', format='%Y-%m-%d')
@@ -219,6 +226,7 @@ def all_outcomes_bp_events_analysis_pipeline(
         outcome_data_path: str,
         output_dir: str,
         filter_noradrenaline: bool = False,
+        restrict_to_DCI: bool = False,
         use_average_event_counts: bool = False,
         bp_parameter: str = 'systole',
         outcomes:  list = ['mrs_1y', 'DCI_YN_verified'],
@@ -246,6 +254,7 @@ def all_outcomes_bp_events_analysis_pipeline(
             outcome_data_path=outcome_data_path,
             output_dir=outcome_dir,
             filter_noradrenaline=filter_noradrenaline,
+            restrict_to_DCI= restrict_to_DCI,
             use_average_event_counts=use_average_event_counts,
             bp_parameter=bp_parameter,
             outcome=outcome,
@@ -275,6 +284,8 @@ if __name__ == '__main__':
                         help='Directory to save the output results.')
     parser.add_argument('--filter_noradrenaline', action='store_true',
                         help='Whether to filter out records with noradrenaline concomitant use.')
+    parser.add_argument('--restrict_to_DCI', action='store_true',
+                        help='Whether to restrict analysis to patients with DCI_YN_verified == 1.')
     parser.add_argument('--use_average_event_counts', action='store_true',
                         help='Whether to use average event counts instead of total counts for analysis.')
     parser.add_argument('--bp_parameter', type=str, default='systole',
@@ -309,6 +320,7 @@ if __name__ == '__main__':
         outcome_data_path=args.outcome_data_path,
         output_dir=args.output_dir,
         filter_noradrenaline=args.filter_noradrenaline,
+        restrict_to_DCI=args.restrict_to_DCI,
         use_average_event_counts=args.use_average_event_counts,
         bp_parameter=args.bp_parameter,
         outcomes=args.outcomes,
