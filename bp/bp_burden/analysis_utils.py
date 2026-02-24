@@ -7,11 +7,11 @@ import numpy as np
 import os
 import seaborn as sns
 import matplotlib.pyplot as plt
-os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Versions/4.1/Resources"
-from pymer4.models import Lmer
+#os.environ["R_HOME"] = "/Library/Frameworks/R.framework/Versions/4.1/Resources"
+#from pymer4.models import Lmer
 
 
-def define_events_over_intensity_thresholds(df, intensity_threshold, parameter_name='systole', relative_time_column='relative_time'):
+def define_events_over_intensity_thresholds(df, intensity_threshold, parameter_name='systole', relative_time_column='relative_time', bp_focus='hypertension'):
     """
     Define events by as all values above a given intensity threshold, for a given parameter
     Duration of events is recorded as the sum of duration of all consecutive measures
@@ -26,8 +26,11 @@ def define_events_over_intensity_thresholds(df, intensity_threshold, parameter_n
     """
 
 
-    # sum duration of subsequent rows above the intensity threshold
-    df['exceeds_intensity_treshold'] = df[parameter_name] >= intensity_threshold
+    # sum duration of subsequent rows above/below the intensity threshold
+    if bp_focus == 'hypertension':
+        df['exceeds_intensity_treshold'] = df[parameter_name] >= intensity_threshold
+    elif bp_focus == 'hypotension':
+        df['exceeds_intensity_treshold'] = df[parameter_name] <= intensity_threshold
     
     # record all events of intensity > threshold and cumulative duration > threshold
     events_df = pd.DataFrame()
@@ -64,7 +67,7 @@ def define_events_over_intensity_thresholds(df, intensity_threshold, parameter_n
     return events_df
 
 
-def define_events_multiple_thresholds(df, intensity_thresholds, parameter_name='systole', relative_time_column='relative_time'):
+def define_events_multiple_thresholds(df, intensity_thresholds, parameter_name='systole', relative_time_column='relative_time', bp_focus='hypertension'):
     """
     Define events by as all values above a given intensity threshold, for a given parameter
     Duration of events is recorded as the sum of duration of all consecutive measures
@@ -80,41 +83,47 @@ def define_events_multiple_thresholds(df, intensity_thresholds, parameter_name='
     
     events_dfs = []
     for threshold in intensity_thresholds:
-        events_df = define_events_over_intensity_thresholds(df, threshold, parameter_name, relative_time_column)
+        events_df = define_events_over_intensity_thresholds(df, threshold, parameter_name, relative_time_column, bp_focus)
         events_dfs.append(events_df)
 
     return pd.concat(events_dfs, ignore_index=True)
 
 
-def threshold_event_duration(events_df, duration_threshold):
+def threshold_event_duration(events_df, duration_threshold, parameter_name='systole'):
     """
     Filter events based on a minimum duration threshold.
-    
+
     Arguments:
         - events_df: DataFrame with events
         - duration_threshold: minimum duration of events to keep
-    
+        - parameter_name: name of column with measured values
+
     Returns: filtered_events_df
     """
     filtered_events_df = events_df[events_df['event_duration'] >= duration_threshold]
     filtered_events_df['duration_threshold'] = duration_threshold
 
+    # exclude threshold combinations with fewer than 10 patients
+    if filtered_events_df.pNr.nunique() < 10:
+        filtered_events_df = filtered_events_df[0:0]
+
     return filtered_events_df
 
 
-def multiple_duration_thresholds(events_df, duration_thresholds):
+def multiple_duration_thresholds(events_df, bp_parameter, duration_thresholds):
     """
     Apply multiple duration thresholds to filter events.
-    
+
     Arguments:
         - events_df: DataFrame with events
+        - bp_parameter: name of the BP parameter column
         - duration_thresholds: list of duration thresholds
-    
+
     Returns: filtered_events_df
     """
     filtered_events_dfs = []
     for threshold in duration_thresholds:
-        filtered_events_df = threshold_event_duration(events_df, threshold)
+        filtered_events_df = threshold_event_duration(events_df, threshold, parameter_name=bp_parameter)
         filtered_events_dfs.append(filtered_events_df)
     
     return pd.concat(filtered_events_dfs, ignore_index=True)
@@ -173,7 +182,7 @@ def event_count_to_mrs_correlation(events_df):
         temp_df.dropna(subset=['event_count', 'mrs_1y'], inplace=True)
         if temp_df.empty:
             continue
-        if len(temp_df) > 1:  # Ensure there are enough data points to compute correlation
+        if len(temp_df) > 2:  # Ensure there are enough data points to compute correlation
             corr, p_value = stats.pearsonr(temp_df['event_count'], temp_df['mrs_1y'])
             correlation_results.append({
                 'intensity_threshold': intensity_threshold,
@@ -202,7 +211,7 @@ def event_product_to_mrs_correlation(events_df):
         temp_df.dropna(subset=['event_product', 'mrs_1y'], inplace=True)
         if temp_df.empty:
             continue
-        if len(temp_df) > 1:  # Ensure there are enough data points to compute correlation
+        if len(temp_df) > 2:  # Ensure there are enough data points to compute correlation
             corr, p_value = stats.pearsonr(temp_df['event_product'], temp_df['mrs_1y'])
             correlation_results.append({
                 'intensity_threshold': intensity_threshold,
@@ -229,7 +238,7 @@ def event_relative_duration_to_mrs_correlation(events_df, relative_duration_colu
         temp_df.dropna(subset=[relative_duration_column, 'mrs_1y'], inplace=True)
         if temp_df.empty:
             continue
-        if len(temp_df) > 1:
+        if len(temp_df) > 2:
             corr, p_value = stats.pearsonr(temp_df[relative_duration_column], temp_df['mrs_1y'])
             correlation_results.append({
                 'intensity_threshold': intensity_threshold,
@@ -459,7 +468,7 @@ def relative_duration_in_correlated_events(duration_thresholded_events_df, event
     return event_duration_with_correlation_df
 
 
-def decision_boundary_analysis(duration_thresholded_events_df, event_count_correlation_df, monitoring_duration_df, covariate_df, 
+def decision_boundary_analysis(duration_thresholded_events_df, event_count_correlation_df, monitoring_duration_df, covariate_df, bp_focus='hypertension',
                                correlation_threshold=0,
                                        outcome='mrs_1y', reg_type='ordinal',
                                        multivariable=True, verbose=False):
@@ -538,7 +547,7 @@ def decision_boundary_analysis(duration_thresholded_events_df, event_count_corre
     if multivariable:
         # mutlivariable model with Age, WFNS, Fisher_Score, Coiling, Clipping
         temp_df = relative_duration_in_correlated_events_df.merge(
-            covariate_df[['pNr', 'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']],
+            covariate_df[['pNr', 'Age', 'WFNS', 'Fisher_Score', 'Coiling', 'Clipping']].drop_duplicates(subset='pNr'),
             on='pNr',
             how='left'
         )

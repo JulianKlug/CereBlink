@@ -8,10 +8,10 @@ from utils.utils import load_encrypted_xlsx, ensure_dir
 from bp.bp_burden.analysis_utils import count_events, define_events_multiple_thresholds, event_count_to_mrs_correlation, multiple_duration_thresholds, decision_boundary_analysis, plot_event_correlation_heatmap, save_decision_boundary_analysis_results_to_csv, event_count_to_DCI_coefficient
 
 
-def event_burden_analysis(working_df, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step, 
-                          bp_parameter, outcome, period_name,
+def event_burden_analysis(working_df, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
+                          bp_parameter, bp_focus, outcome, period_name,
                           output_dir, monitoring_duration_df, main_df,
-                          use_average_event_counts=False, 
+                          use_average_event_counts=False,
                           verbose=False, correlation_threshold=0):
     if outcome == 'mrs_1y':
         reg_type = 'ordinal'
@@ -22,9 +22,9 @@ def event_burden_analysis(working_df, intensity_threshold_range, intensity_thres
     
     events_df = define_events_multiple_thresholds(working_df,
                                             intensity_thresholds=range(intensity_threshold_range[0], intensity_threshold_range[1] + 1, intensity_threshold_step),
-                                            parameter_name=bp_parameter)
+                                            parameter_name=bp_parameter, bp_focus=bp_focus)
 
-    duration_thresholded_events_df = multiple_duration_thresholds(events_df,
+    duration_thresholded_events_df = multiple_duration_thresholds(events_df, bp_parameter,
                                                                     duration_thresholds=range(duration_range[0], duration_range[1] + 1, duration_step))
 
     event_counts_df = count_events(duration_thresholded_events_df)
@@ -39,14 +39,16 @@ def event_burden_analysis(working_df, intensity_threshold_range, intensity_thres
 
     # Create figure
     fig = plot_event_correlation_heatmap(association_df, coefficient_name=coefficient_name, step_size=min(intensity_threshold_step, duration_step))
-    fig.suptitle(f'{bp_parameter} event counts vs {outcome} in {period_name}')
-    fig.savefig(os.path.join(output_dir, f'{bp_parameter}_event_counts_vs_{outcome}_in_{period_name}.png'), bbox_inches='tight', dpi=300)
+    fig.suptitle(f'{bp_parameter} in {bp_focus} episodes event counts vs {outcome} in {period_name}')
+    title_save = ''
+    suffix = f"_{title_save}" if title_save else ""
+    fig.savefig(os.path.join(output_dir, f'{bp_parameter}_event_counts_vs_{outcome}_in_{period_name}{suffix}.png'), bbox_inches='tight', dpi=300)
     plt.close(fig)
 
-    decision_boundary_analysis_results = decision_boundary_analysis(duration_thresholded_events_df, association_df, monitoring_duration_df, main_df, verbose=verbose,
+    decision_boundary_analysis_results = decision_boundary_analysis(duration_thresholded_events_df, association_df, monitoring_duration_df, main_df, bp_focus, verbose=verbose,
                                                                         correlation_threshold=correlation_threshold,
                                                                         outcome=outcome, reg_type=reg_type)
-    save_decision_boundary_analysis_results_to_csv(decision_boundary_analysis_results, output_dir, f'{bp_parameter}_{outcome}_t{correlation_threshold}_{period_name}_decision_boundary_analysis')
+    save_decision_boundary_analysis_results_to_csv(decision_boundary_analysis_results, output_dir, f'{bp_parameter}_in {bp_focus} episodes_{outcome}_t{correlation_threshold}_{period_name}_decision_boundary_analysis')
     
     return decision_boundary_analysis_results
 
@@ -57,39 +59,45 @@ def bp_events_analysis_pipeline(
         correspondance_data_path: str,
         outcome_data_path: str,
         output_dir: str,
+        intensity_threshold_range: tuple,
+        intensity_threshold_step: int,
+        duration_range: tuple,
+        duration_step: int,
+        bp_parameter: str,
+        bp_focus: str,
         filter_noradrenaline: bool = False,
         restrict_to_DCI: bool = False,
+        restrict_to_non_DCI: bool = False,
         use_average_event_counts: bool = False,
-        bp_parameter: str = 'systole',
         outcome: str = 'mrs_1y',
-        intensity_threshold_range: tuple = (140, 220),
-        intensity_threshold_step: int = 10,
-        duration_range: tuple = (0, 180),
-        duration_step: int = 10,
         correlation_threshold: float = 0,
         registry_password: str = None,
         outcome_password: str = None,
-        verbose: bool = False):
-    
+        verbose: bool = False,
+        preloaded_registry_df: pd.DataFrame = None,
+        preloaded_outcome_df: pd.DataFrame = None,
+        preloaded_bp_df: pd.DataFrame = None,
+        preloaded_correspondance_df: pd.DataFrame = None):
+
     # check outcome is in ['mrs_1y', 'DCI_YN_verified']
     if outcome not in ['mrs_1y', 'DCI_YN_verified']:
         raise ValueError(f'Invalid outcome: {outcome}. Must be one of ["mrs_1y", "DCI_YN_verified"].')
     # bp_parameter must be in ['systole', 'diastole', 'mitteldruck']
     if bp_parameter not in ['systole', 'diastole', 'mitteldruck']:
         raise ValueError(f'Invalid bp_parameter: {bp_parameter}. Must be one of ["systole", "diastole", "mitteldruck"].')
-    
+
     ensure_dir(output_dir)
 
-    registry_df = load_encrypted_xlsx(registry_data_path, password=registry_password)
-    outcome_df = load_encrypted_xlsx(outcome_data_path, password=outcome_password)
-    nor_annotated_bp_df = pd.read_csv(nor_annotated_bp_data_path)
+    registry_df = preloaded_registry_df.copy() if preloaded_registry_df is not None else load_encrypted_xlsx(registry_data_path, password=registry_password)
+    outcome_df = preloaded_outcome_df.copy() if preloaded_outcome_df is not None else load_encrypted_xlsx(outcome_data_path, password=outcome_password)
+    nor_annotated_bp_df = preloaded_bp_df.copy() if preloaded_bp_df is not None else pd.read_csv(nor_annotated_bp_data_path)
 
     if filter_noradrenaline:
         bp_df = nor_annotated_bp_df[nor_annotated_bp_df['noradrenaline_concomitant'] == 0]
     else:
         bp_df = nor_annotated_bp_df
 
-    registry_pdms_correspondance_df = pd.read_csv(correspondance_data_path)
+    registry_pdms_correspondance_df = preloaded_correspondance_df.copy() if preloaded_correspondance_df is not None else pd.read_csv(correspondance_data_path)
 
     # drop duplicates 
     bp_df = bp_df.drop_duplicates(subset=['pNr', 
@@ -137,7 +145,13 @@ def bp_events_analysis_pipeline(
         main_df = main_df[main_df['DCI_YN_verified'] == 1]
         if verbose:
             print(f'Restricted to DCI patients. Number of patients: {main_df["pNr"].nunique()}')
-    
+
+    if restrict_to_non_DCI:
+        # filter main_df to only include patients with DCI_YN_verified != 1
+        main_df = main_df[main_df['DCI_YN_verified'] != 1]
+        if verbose:
+            print(f'Restricted to non DCI patients. Number of patients: {main_df["pNr"].nunique()}')
+
     # compute timings
     main_df['Date_DCI_ischemia_first_image'] = pd.to_datetime(main_df['Date_DCI_ischemia_first_image'], errors='coerce', format='%Y-%m-%d')
     main_df['Time_DCI_ischemia_first_image'] = pd.to_datetime(main_df['Time_DCI_ischemia_first_image'], errors='coerce', format='%H:%M:%S')
@@ -180,7 +194,11 @@ def bp_events_analysis_pipeline(
     main_df['delta_time'] = main_df['delta_time'].dt.total_seconds() / 60
     main_df['product'] = main_df['delta_time'] * main_df[bp_parameter]
 
-    working_df = main_df[['relative_time', 'pNr', 'delta_time', 'systole', 'product', 'DCI_YN_verified', 'mrs_1y', 'first_Th_relative_date']]
+    # define relative ischemia
+    main_df['relative_dci_time'] = main_df['timestamp_ischemia'] - main_df['T0']
+    main_df['relative_dci_time'] = main_df['relative_dci_time'].dt.total_seconds() / 60
+
+    working_df = main_df[['relative_time', 'pNr', 'delta_time', 'systole', 'diastole', 'mitteldruck', 'product', 'DCI_YN_verified', 'mrs_1y', 'first_Th_relative_date', 'relative_dci_time']]
 
 
     # Analysis
@@ -188,7 +206,7 @@ def bp_events_analysis_pipeline(
     # analysis for first 24 hours of monitoring
     working_df_in_first_24h_monitoring = working_df[working_df['relative_time'] <= 24 * 60]  # 24 hours in minutes
     _ = event_burden_analysis(working_df_in_first_24h_monitoring, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
-                                    bp_parameter, outcome, 'first_24h',
+                                    bp_parameter, bp_focus, outcome, 'first_24h',
                                     output_dir, monitoring_duration_df, main_df,
                                     use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
@@ -196,7 +214,7 @@ def bp_events_analysis_pipeline(
     # analysis for 24h-to-end of monitoring
     working_df_after_24h_monitoring = working_df[working_df['relative_time'] > 24 * 60]  # 24 hours in minutes
     _ = event_burden_analysis(working_df_after_24h_monitoring, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
-                                    bp_parameter, outcome, 'after_24h',
+                                    bp_parameter, bp_focus, outcome, 'after_24h',
                                     output_dir, monitoring_duration_df, main_df,
                                     use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
@@ -204,16 +222,30 @@ def bp_events_analysis_pipeline(
     # before aneurysm treatment
     working_df_before_aneurym_secured = working_df[working_df['relative_time'] < (working_df['first_Th_relative_date'] + 24 * 60)]  # 24 hours in minutes
     _ = event_burden_analysis(working_df_before_aneurym_secured, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
-                                    bp_parameter, outcome, 'before_aneurysm_secured',
+                                    bp_parameter, bp_focus, outcome, 'before_aneurysm_secured',
                                     output_dir, monitoring_duration_df, main_df,
                                     use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
-    
 
     # after aneurysm treatment
     working_df_after_aneurym_secured = working_df[working_df['relative_time'] >= (working_df['first_Th_relative_date'] + 24 * 60)]  # 24 hours in minutes
     _ = event_burden_analysis(working_df_after_aneurym_secured, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
-                                    bp_parameter, outcome, 'after_aneurysm_secured',
+                                    bp_parameter, bp_focus, outcome, 'after_aneurysm_secured',
+                                    output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
+                                    verbose=verbose, correlation_threshold=correlation_threshold)
+
+    # Before/after DCI time periods (only for DCI-restricted analyses)
+    if restrict_to_DCI:
+        working_df_before_DCI = working_df[working_df['relative_time'] <= working_df['relative_dci_time']]
+        _ = event_burden_analysis(working_df_before_DCI, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
+                                    bp_parameter, bp_focus, outcome, 'before_dci',
+                                    output_dir, monitoring_duration_df, main_df,
+                                    use_average_event_counts=use_average_event_counts,
+                                    verbose=verbose, correlation_threshold=correlation_threshold)
+        working_df_after_DCI = working_df[working_df['relative_time'] > working_df['relative_dci_time']]
+        _ = event_burden_analysis(working_df_after_DCI, intensity_threshold_range, intensity_threshold_step, duration_range, duration_step,
+                                    bp_parameter, bp_focus, outcome, 'after_dci',
                                     output_dir, monitoring_duration_df, main_df,
                                     use_average_event_counts=use_average_event_counts,
                                     verbose=verbose, correlation_threshold=correlation_threshold)
@@ -225,15 +257,17 @@ def all_outcomes_bp_events_analysis_pipeline(
         correspondance_data_path: str,
         outcome_data_path: str,
         output_dir: str,
+        intensity_threshold_range: tuple,
+        intensity_threshold_step: int,
+        duration_range: tuple,
+        duration_step: int,
+        bp_parameter: str,
+        bp_focus: str,
         filter_noradrenaline: bool = False,
         restrict_to_DCI: bool = False,
+        restrict_to_non_DCI: bool = False,
         use_average_event_counts: bool = False,
-        bp_parameter: str = 'systole',
-        outcomes:  list = ['mrs_1y', 'DCI_YN_verified'],
-        intensity_threshold_range: tuple = (140, 220),
-        intensity_threshold_step: int = 10,
-        duration_range: tuple = (0, 180),
-        duration_step: int = 10,
+        outcomes: list = ['mrs_1y', 'DCI_YN_verified'],
         correlation_threshold: float = 0,
         verbose: bool = False):
 
@@ -244,7 +278,7 @@ def all_outcomes_bp_events_analysis_pipeline(
         if verbose:
             print(f'Running analysis for outcome: {outcome}')
 
-        outcome_dir =  os.path.join(output_dir, outcome)
+        outcome_dir = os.path.join(output_dir, outcome)
         ensure_dir(outcome_dir)
 
         bp_events_analysis_pipeline(
@@ -253,15 +287,17 @@ def all_outcomes_bp_events_analysis_pipeline(
             correspondance_data_path=correspondance_data_path,
             outcome_data_path=outcome_data_path,
             output_dir=outcome_dir,
-            filter_noradrenaline=filter_noradrenaline,
-            restrict_to_DCI= restrict_to_DCI,
-            use_average_event_counts=use_average_event_counts,
-            bp_parameter=bp_parameter,
-            outcome=outcome,
             intensity_threshold_range=intensity_threshold_range,
             intensity_threshold_step=intensity_threshold_step,
             duration_range=duration_range,
             duration_step=duration_step,
+            bp_parameter=bp_parameter,
+            bp_focus=bp_focus,
+            filter_noradrenaline=filter_noradrenaline,
+            restrict_to_DCI=restrict_to_DCI,
+            restrict_to_non_DCI=restrict_to_non_DCI,
+            use_average_event_counts=use_average_event_counts,
+            outcome=outcome,
             correlation_threshold=correlation_threshold,
             registry_password=registry_password,
             outcome_password=outcome_password,
@@ -286,11 +322,16 @@ if __name__ == '__main__':
                         help='Whether to filter out records with noradrenaline concomitant use.')
     parser.add_argument('--restrict_to_DCI', action='store_true',
                         help='Whether to restrict analysis to patients with DCI_YN_verified == 1.')
+    parser.add_argument('--restrict_to_non_DCI', action='store_true',
+                        help='Whether to restrict analysis to patients with DCI_YN_verified != 1.')
     parser.add_argument('--use_average_event_counts', action='store_true',
                         help='Whether to use average event counts instead of total counts for analysis.')
     parser.add_argument('--bp_parameter', type=str, default='systole',
                         choices=['systole', 'diastole', 'mitteldruck'],
                         help='Blood pressure parameter to analyze.')
+    parser.add_argument('--bp_focus', type=str, default='hypertension',
+                        choices=['hypertension', 'hypotension'],
+                        help='Focus on hypertension or hypotension episodes.')
     parser.add_argument('--outcomes', type=str, nargs='+', default=['mrs_1y', 'DCI_YN_verified'],
                         help='List of outcomes to analyze. Default is ["mrs_1y", "DCI_YN_verified"].')
     parser.add_argument('--intensity_threshold_range', type=int, nargs=2, default=(140, 220),
@@ -304,7 +345,7 @@ if __name__ == '__main__':
     parser.add_argument('--correlation_threshold', type=float, default=0,
                         help='Correlation threshold for decision boundary analysis. Default is 0.')
     parser.add_argument('-v', '--verbose', action='store_true',
-                        help='Whether to print verbose output during analysis.')  
+                        help='Whether to print verbose output during analysis.')
 
     args = parser.parse_args()
 
@@ -319,15 +360,17 @@ if __name__ == '__main__':
         correspondance_data_path=args.correspondance_data_path,
         outcome_data_path=args.outcome_data_path,
         output_dir=args.output_dir,
-        filter_noradrenaline=args.filter_noradrenaline,
-        restrict_to_DCI=args.restrict_to_DCI,
-        use_average_event_counts=args.use_average_event_counts,
-        bp_parameter=args.bp_parameter,
-        outcomes=args.outcomes,
         intensity_threshold_range=tuple(args.intensity_threshold_range),
         intensity_threshold_step=args.intensity_threshold_step,
         duration_range=tuple(args.duration_range),
         duration_step=args.duration_step,
+        bp_parameter=args.bp_parameter,
+        bp_focus=args.bp_focus,
+        filter_noradrenaline=args.filter_noradrenaline,
+        restrict_to_DCI=args.restrict_to_DCI,
+        restrict_to_non_DCI=args.restrict_to_non_DCI,
+        use_average_event_counts=args.use_average_event_counts,
+        outcomes=args.outcomes,
         correlation_threshold=args.correlation_threshold,
         verbose=args.verbose
     )
