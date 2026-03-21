@@ -6,6 +6,7 @@ Loads registry, outcomes, and PDMS time-series data, extracts baseline
 missingness summary table (missingness_table.csv).
 """
 
+import os
 import sys
 import warnings
 
@@ -406,6 +407,11 @@ def main():
 
     miss.to_csv("missingness_table.csv", index=False)
     print(f"\nSaved missingness_table.csv ({len(miss)} variables)")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pt_path = os.path.join(script_dir, "artifacts", "patient_table.csv")
+    pt.to_csv(pt_path, index=True)
+    print(f"Saved {pt_path} ({len(pt)} patients)")
 
     # Print summary
     print(f"\n{'='*80}")
