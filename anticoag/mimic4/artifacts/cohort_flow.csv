@@ -1,0 +1,6 @@
+step,description,n_excluded,n_remaining,n_subjects
+0,SAH admissions (ICD-9 430 / ICD-10 I60x),0,1576,1531
+1,Traumatic SAH (skull fracture / TBI codes),27,1549,1504
+2,Age < 18,0,1549,1504
+3,No ICU stay,250,1299,1280
+4,Subsequent SAH admissions (keep first only),19,1280,1280

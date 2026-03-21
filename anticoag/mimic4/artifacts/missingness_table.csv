@@ -1,0 +1,54 @@
+variable,column,category,available_in_data,n_total,n_available,n_missing,pct_missing
+Age,age,Demographics,True,1280,1280,0,0.0
+Sex,sex,Demographics,True,1280,1280,0,0.0
+Race/Ethnicity,race,Demographics,True,1280,1280,0,0.0
+Hypertension,hypertension,Comorbidities,True,1280,1280,0,0.0
+Diabetes mellitus,diabetes,Comorbidities,True,1280,1280,0,0.0
+Smoking history,smoking_history,Comorbidities,True,1280,1280,0,0.0
+Renal disease,renal_disease,Comorbidities,True,1280,1280,0,0.0
+Liver disease,liver_disease,Comorbidities,True,1280,1280,0,0.0
+Prior anticoagulant use,prior_anticoagulant,Comorbidities,True,1280,1280,0,0.0
+Prior antiplatelet use,prior_antiplatelet,Comorbidities,True,1280,1280,0,0.0
+GCS on admission,gcs_admission,Clinical Grades,True,1280,1274,6,0.5
+Hunt-Hess (derived from GCS),hunt_hess_derived,Clinical Grades,True,1280,1274,6,0.5
+WFNS (derived from GCS),wfns_derived,Clinical Grades,True,1280,1274,6,0.5
+Fisher grade,fisher_grade,Clinical Grades,False,1280,0,1280,100.0
+IVH,ivh,Clinical Grades,False,1280,0,1280,100.0
+ICH,ich,Clinical Grades,False,1280,0,1280,100.0
+Admission MAP,admission_map,Physiology,True,1280,1273,7,0.5
+Admission SBP,admission_sbp,Physiology,True,1280,1274,6,0.5
+Admission heart rate,admission_heart_rate,Physiology,True,1280,1278,2,0.2
+Admission temperature,admission_temp,Physiology,True,1280,1267,13,1.0
+Admission WBC,admission_wbc,Physiology,True,1280,1223,57,4.5
+Admission hemoglobin,admission_hemoglobin,Physiology,True,1280,1223,57,4.5
+Admission creatinine,admission_creatinine,Physiology,True,1280,1224,56,4.4
+Admission glucose,admission_glucose,Physiology,True,1280,1224,56,4.4
+Admission sodium,admission_sodium,Physiology,True,1280,1225,55,4.3
+Admission potassium,admission_potassium,Physiology,True,1280,1224,56,4.4
+Admission platelets,admission_platelets,Physiology,True,1280,1222,58,4.5
+Admission INR,admission_inr,Physiology,True,1280,1154,126,9.8
+Admission PTT,admission_ptt,Physiology,True,1280,1149,131,10.2
+Admission lactate,admission_lactate,Physiology,True,1280,524,756,59.1
+Admission albumin,admission_albumin,Physiology,True,1280,334,946,73.9
+Admission bilirubin,admission_bilirubin,Physiology,True,1280,406,874,68.3
+CRP,crp,Physiology,False,1280,0,1280,100.0
+Heparin exposure,heparin_ever,Treatment,True,1280,1280,0,0.0
+Enoxaparin exposure,enoxaparin_ever,Treatment,True,1280,1280,0,0.0
+Received both agents,received_both,Treatment,True,1280,1280,0,0.0
+Heparin max daily dose,heparin_max_daily_dose,Treatment,True,1280,987,293,22.9
+Enoxaparin max daily dose,enoxaparin_max_daily_dose,Treatment,True,1280,30,1250,97.7
+Clipping,treatment_clipping,Procedures,True,1280,1280,0,0.0
+Coiling,treatment_coiling,Procedures,True,1280,1280,0,0.0
+EVD placement,evd_placement,Procedures,True,1280,1280,0,0.0
+Aneurysm size,aneurysm_size,Aneurysm,False,1280,0,1280,100.0
+Aneurysm location,aneurysm_location,Aneurysm,False,1280,0,1280,100.0
+Multiple aneurysms,aneurysm_multiplicity,Aneurysm,False,1280,0,1280,100.0
+Time ictus-to-treatment,time_ictus_to_treatment,Aneurysm,False,1280,0,1280,100.0
+Pre-morbid mRS,premorbid_mrs,Aneurysm,False,1280,0,1280,100.0
+Hospital mortality,hospital_mortality,Outcomes,True,1280,1280,0,0.0
+DCI (ICD proxy),dci_icd,Outcomes,True,1280,1280,0,0.0
+Rebleeding (ICD proxy),rebleeding_icd,Outcomes,True,1280,1280,0,0.0
+ICU length of stay,icu_los_days,Outcomes,True,1280,1279,1,0.1
+Hospital length of stay,hospital_los_days,Outcomes,True,1280,1280,0,0.0
+mRS at discharge,mrs_discharge,Outcomes,False,1280,0,1280,100.0
+mRS at 1 year,mrs_1y,Outcomes,False,1280,0,1280,100.0
