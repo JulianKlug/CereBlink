@@ -10,7 +10,7 @@ from utils.plotting_utils import plot_metric_distributions_over_timebins
 def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 'min', 'max', 'cv', 'arv', 'ci'],
                                     bp_metrics=['systole', 'diastole', 'mitteldruck'], noradrenaline_handling='filter',
                                      normalisation=False, use_qvalues=False,
-                                no_annotation=False):
+                                no_annotation=False, no_title=False, output_folder=None):
     assert int(pd.__version__[0]) < 2, 'Please < 2 required for statannotations'
 
     timebin_metrics = [f'{bp_metric}{"_normalised" if normalisation else ""}_{metric_over_time}' for bp_metric in bp_metrics for metric_over_time in metrics_over_time]
@@ -60,7 +60,8 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
         bp_df, metrics_over_time, timebin_metrics, plot_type='box',
         pvals=pval_df, pval_method=pval_method, alpha=0.5,
         plot_legend=True, tick_label_size=11,
-        label_font_size=13, fig=None)
+        label_font_size=13, fig=None, title=False, ylabel=True
+    )
 
     if normalisation:
         fig.suptitle(f'DCI ischemia: BP metrics over timebins (normalized/noradrenaline {noradrenaline_handling})', fontsize=16, y=0.9)
@@ -69,23 +70,33 @@ def plot_metric_per_timebin_boxplots(input_folder, metrics_over_time=['median', 
         fig_name = f'DCI_ischemia_bp_metrics_over_timebins_nor_{noradrenaline_handling}.png'
         fig.suptitle(f'DCI ischemia: BP metrics over timebins (not normalized/noradrenaline {noradrenaline_handling})', fontsize=16, y=0.9)
 
+    if no_title:
+        fig.suptitle('')
+
     if use_qvalues:
         fig_name = fig_name.replace('.png', '_qvalues.png')
     if no_annotation:
         fig_name = fig_name.replace('.png', '_no_annotation.png')
 
-    fig.savefig(os.path.join(input_folder, fig_name), dpi=300)
+    if output_folder is None:
+        output_folder = input_folder
+
+    fig.savefig(os.path.join(output_folder, fig_name), dpi=300)
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input_folder', type=str, required=True)
+    # output folder
+    parser.add_argument('-o', '--output_folder', type=str, default=None)
     parser.add_argument('-N', '--normalisation', action='store_true', help='Whether to plot normalised data or not')
     parser.add_argument('-q', '--use_qvalues', action='store_true', help='Whether to use qvalues instead of pvalues')
     parser.add_argument('-nor', '--noradrenaline_handling', type=str, default='filter')
     parser.add_argument('-ci', '--complexity_index', action='store_true')
     parser.add_argument('-no_annotation', '--no_annotation', action='store_true')
+    # no title
+    parser.add_argument('-no_title', '--no_title', action='store_true', help='Whether to plot the title or not')
     args = parser.parse_args()
 
     if args.noradrenaline_handling in ['None', 'none', '0']:
@@ -95,7 +106,9 @@ if __name__ == '__main__':
     if args.complexity_index:
         metrics_over_time.append('ci')
 
-    plot_metric_per_timebin_boxplots(args.input_folder, normalisation=args.normalisation, use_qvalues=args.use_qvalues,
+    plot_metric_per_timebin_boxplots(args.input_folder, 
+                                     output_folder=args.output_folder,
+                                     normalisation=args.normalisation, use_qvalues=args.use_qvalues,
                                         metrics_over_time=metrics_over_time,
                                         noradrenaline_handling=args.noradrenaline_handling,
-                                     no_annotation=args.no_annotation)
+                                     no_annotation=args.no_annotation, no_title=args.no_title)

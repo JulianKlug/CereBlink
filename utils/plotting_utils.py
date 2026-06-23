@@ -6,7 +6,7 @@ from statannotations.Annotator import Annotator
 
 def plot_metric_distributions_over_timebins(df, over_time_metrics, timebin_metrics, plot_type='box', pvals=None, pval_method='adjusted_pval', alpha=0.5,
                                             plot_legend = True, tick_label_size = 11,
-                                            label_font_size = 13, fig=None):
+                                            label_font_size = 13, fig=None, title=True, ylabel=True):
     assert int(pd.__version__[0]) < 2, 'Please < 2 required for statannotations'
 
     n_columns = len(over_time_metrics)
@@ -38,8 +38,23 @@ def plot_metric_distributions_over_timebins(df, over_time_metrics, timebin_metri
             sns.boxplot(**plot_params, ax=axes[i // n_columns, i % n_columns])
         else:
             print('plot type not recognized')
-        axes[i // n_columns, i % n_columns].set_title(metric)
-        axes[i // n_columns, i % n_columns].set_ylabel('')
+
+        metric_name_parts = metric.split('_')
+        bp_metric = metric_name_parts[0]
+        if bp_metric == 'mitteldruck':
+            metric_name = f'Mean arterial pressure ({metric_name_parts[1]})'
+        elif bp_metric == 'systole':
+            metric_name = f'Systolic blood pressure ({metric_name_parts[1]})'
+        elif bp_metric == 'diastole':
+            metric_name = f'Diastolic blood pressure ({metric_name_parts[1]})'
+
+        if title:
+            axes[i // n_columns, i % n_columns].set_title(metric_name)
+        if ylabel:
+            # if not cv or arv in metric, add unit mmHg
+            if not any(x in metric for x in ['cv', 'arv']):
+                metric_name += ' (mmHg)'
+            axes[i // n_columns, i % n_columns].set_ylabel(metric_name)
         axes[i // n_columns, i % n_columns].set_xlabel('Timebin size (hours)', fontsize=label_font_size)
         axes[i // n_columns, i % n_columns].tick_params('x', labelsize=tick_label_size)
         axes[i // n_columns, i % n_columns].tick_params('y', labelsize=tick_label_size)

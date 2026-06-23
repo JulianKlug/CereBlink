@@ -4,6 +4,8 @@ import io
 import getpass
 import msoffcrypto
 import asyncio
+import re
+
 
 def load_encrypted_xlsx(file_path, sheet_name=None, password=None):
     """
@@ -52,3 +54,17 @@ def background(f):
         return asyncio.get_event_loop().run_in_executor(None, f, *args, **kwargs)
 
     return wrapped
+
+
+def _parse_code_not_mapped(x, mapped):
+    if pd.isna(x):
+        return False
+    s = str(x)
+    m = re.search(r'(\d+)', s)
+    if not m:
+        return False
+    try:
+        code = int(m.group(1))
+    except Exception:
+        return False
+    return code not in mapped
