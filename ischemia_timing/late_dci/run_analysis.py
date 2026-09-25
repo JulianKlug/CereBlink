@@ -27,6 +27,19 @@ SENSITIVITY_LANDMARKS = [5.0, 10.0]
 FLOAT_FORMAT = '.3f'
 FIGURE_DPI = 300
 
+# Figure 3 labels, top to bottom
+FOREST_LABELS = {
+    'age': 'Age (per year)',
+    'male': 'Sex (male)',
+    'hypertension': 'Hypertension',
+    'poor_wfns': 'WFNS 4-5 (vs 1-3)',
+    'fisher': 'Modified Fisher (per grade)',
+    'active_smoker': 'Active smoking',
+    'aspirin': 'Aspirin before SAH',
+    'year': 'Calendar year (per year)',
+}
+FOREST_TICKS = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0]
+
 
 class Report:
     """Collects tables into CSV files and one markdown summary."""
@@ -61,6 +74,7 @@ class Report:
 def _data_quality(patients: pd.DataFrame) -> pd.DataFrame:
     rows = [
         ('ictus from timings file', int((patients['ictus_source'] == 'timings').sum())),
+        ('ictus from registry (timings file disagreed)', int((patients['ictus_source'] == 'registry').sum())),
         ('ictus recovered from outcomes file', int((patients['ictus_source'] == 'outcomes').sum())),
         ('ictus missing', int((patients['ictus_source'] == 'missing').sum())),
         ('death status from registry', int((patients['death_source'] == 'registry').sum())),
@@ -89,6 +103,42 @@ def _plot_cumulative_incidence(overall: pd.DataFrame, by_wfns: pd.DataFrame, pat
 
     fig.tight_layout()
     fig.savefig(path, dpi=FIGURE_DPI)
+    plt.close(fig)
+
+
+def _plot_forest(model: pd.DataFrame, path: str) -> None:
+    """Figure 3: primary-model HRs on a log axis, estimate columns on the right."""
+    rows = model.set_index('covariate').loc[list(FOREST_LABELS)]
+    y = range(len(rows))[::-1]
+
+    fig, ax = plt.subplots(figsize=(9, 4.5))
+    ax.errorbar(rows['HR'], y, xerr=[rows['HR'] - rows['lower'], rows['upper'] - rows['HR']],
+                fmt='o', color='black', markersize=7, elinewidth=1, capsize=0)
+    ax.axvline(1.0, linestyle='--', color='grey', linewidth=1)
+
+    ax.set_xscale('log')
+    ax.set_xlim(FOREST_TICKS[0], FOREST_TICKS[-1])
+    ax.set_xticks(FOREST_TICKS)
+    ax.set_xticklabels([f'{tick:g}' for tick in FOREST_TICKS])
+    ax.minorticks_off()
+    ax.set_yticks(list(y))
+    ax.set_yticklabels(FOREST_LABELS.values())
+    ax.set_ylim(-0.7, len(rows) - 0.3)
+    ax.set_xlabel('Cause-specific hazard ratio (95% CI)')
+    for side in ('top', 'right', 'left'):
+        ax.spines[side].set_visible(False)
+    ax.tick_params(axis='y', length=0)
+
+    # x in axes fraction, y in data units
+    transform = ax.get_yaxis_transform()
+    ax.text(1.05, len(rows) - 0.3, 'HR (95% CI)', transform=transform, fontweight='bold')
+    ax.text(1.32, len(rows) - 0.3, 'p', transform=transform, fontweight='bold')
+    for yi, (_, row) in zip(y, rows.iterrows()):
+        ax.text(1.05, yi, f'{row.HR:.2f} ({row.lower:.2f}-{row.upper:.2f})', transform=transform, va='center')
+        p_text = '<0.001' if row.p < 0.001 else f'{row.p:.3f}' if row.p < 0.01 else f'{row.p:.2f}'
+        ax.text(1.32, yi, p_text, transform=transform, va='center')
+
+    fig.savefig(path, dpi=FIGURE_DPI, bbox_inches='tight')
     plt.close(fig)
 
 
@@ -151,8 +201,9 @@ def run(data_dir: str, secrets_path: str, output_dir: str) -> None:
                 'Figure: `cumulative_incidence.png`.')
 
     # Primary model
-    report.table('primary_model', 'Primary model: cause-specific Cox, complete case',
-                 analyses.cause_specific_table(risk_set, CORE_COVARIATES, 'primary'))
+    primary = analyses.cause_specific_table(risk_set, CORE_COVARIATES, 'primary')
+    report.table('primary_model', 'Primary model: cause-specific Cox, complete case', primary)
+    _plot_forest(primary, os.path.join(output_dir, 'forest_primary.png'))
     report.table('proportional_hazards', 'Proportional hazards (Schoenfeld, rank time)',
                  analyses.proportional_hazards_check(risk_set, CORE_COVARIATES))
 

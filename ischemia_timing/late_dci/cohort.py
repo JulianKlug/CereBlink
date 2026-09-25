@@ -137,10 +137,13 @@ def build_patients(sources: RawSources) -> pd.DataFrame:
 
     patients = pd.DataFrame(index=timings.index)
 
-    # Ictus: timings file, else outcomes file
+    # Ictus: timings file, else outcomes file; registry wins on disagreement (typos, e.g. 2003 for 2013)
     ictus_timings = _dates(timings['Date_Ictus'])
-    ictus = ictus_timings.fillna(_dates(out('Date_Ictus')))
-    patients['ictus_source'] = np.where(ictus_timings.notna(), 'timings', np.where(ictus.notna(), 'outcomes', 'missing'))
+    ictus_registry = _dates(reg('Date_Ictus'))
+    registry_disagrees = ictus_timings.notna() & ictus_registry.notna() & (ictus_timings != ictus_registry)
+    ictus = ictus_timings.where(~registry_disagrees, ictus_registry).fillna(_dates(out('Date_Ictus')))
+    patients['ictus_source'] = np.where(registry_disagrees, 'registry',
+                                        np.where(ictus_timings.notna(), 'timings', np.where(ictus.notna(), 'outcomes', 'missing')))
 
     # DCI: verified status, onset = first DCI image date + time
     dci_onset = _dates(timings['Date_DCI_ischemia_first_image']) + timings['Time_DCI_ischemia_first_image'].map(_to_time_of_day)
