@@ -28,12 +28,12 @@ FIGURE_DPI = 300
 FIGURE_NAME = 'imaging_over_time.png'
 
 METRIC_LABELS = {
-    'TTP_increase': 'TTP increased',
-    'TTD_increase': 'TTD increased',
-    'Tmax_increase': 'Tmax increased',
-    'MTT_increased': 'MTT increased',
-    'CBV_reduced': 'CBV reduced',
-    'CBF_reduced': 'CBF reduced',
+    'TTP_increase': 'TTP',
+    'TTD_increase': 'TTD',
+    'Tmax_increase': 'Tmax',
+    'MTT_increased': 'MTT',
+    'CBV_reduced': 'CBV',
+    'CBF_reduced': 'CBF',
 }
 
 # Categorical slots 1-2 of the reference palette; ink and grid stay neutral
@@ -74,33 +74,32 @@ def _plot_pct_per_year(ax, by_year: pd.DataFrame) -> None:
 
 def _plot_metric_availability(ax, fig, availability: pd.DataFrame, years: list[int]) -> None:
     percent = availability.pivot(index='metric', columns='year', values='percent').reindex(index=PERFUSION_METRICS, columns=years)
-    counts = availability.pivot(index='metric', columns='year', values='n_available').reindex(index=PERFUSION_METRICS, columns=years)
     n_dci = availability.drop_duplicates('year').set_index('year')['n_dci'].reindex(years)
 
     cmap = plt.get_cmap('Blues').copy()
     cmap.set_bad(NO_DATA_COLOR)
     image = ax.imshow(np.ma.masked_invalid(percent.to_numpy(dtype=float)), cmap=cmap, vmin=0, vmax=100, aspect='auto')
 
-    # Cell text: patients with the metric reported, e.g. '11' of n = 11 DCI patients that year
+    # Cell text: % of DCI diagnostic scans with the metric reported, e.g. 8 of 16 in 2018 -> '50%'
     for row, metric in enumerate(PERFUSION_METRICS):
         for column, year in enumerate(years):
             if np.isnan(percent.loc[metric, year]):
                 continue
             color = 'white' if percent.loc[metric, year] >= HEATMAP_TEXT_THRESHOLD else TEXT_SECONDARY
-            ax.text(column, row, int(counts.loc[metric, year]), ha='center', va='center', fontsize=7, color=color)
+            ax.text(column, row, f'{percent.loc[metric, year]:.0f}%', ha='center', va='center', fontsize=6.5, color=color)
 
     ax.set_yticks(range(len(PERFUSION_METRICS)))
     ax.set_yticklabels([METRIC_LABELS[metric] for metric in PERFUSION_METRICS])
     ax.set_xticks(range(len(years)))
     ax.set_xticklabels([f'{year}\nn={0 if np.isnan(n) else int(n)}' for year, n in n_dci.items()], rotation=90, fontsize=8)
-    ax.set_xlabel('Year of haemorrhage (n = patients with DCI)')
+    ax.set_xlabel('Year of haemorrhage (n = DCI diagnostic scans)')
     ax.tick_params(length=0)
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.set_title('B  Perfusion metrics reported at DCI diagnosis', loc='left', fontweight='bold')
+    ax.set_title('B  Perfusion metrics available at DCI diagnosis', loc='left', fontweight='bold')
 
     colorbar = fig.colorbar(image, ax=ax, fraction=0.04, pad=0.02)
-    colorbar.set_label('% of patients with DCI')
+    colorbar.set_label('% of DCI diagnostic scans')
     colorbar.outline.set_visible(False)
 
 
