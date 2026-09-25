@@ -14,6 +14,10 @@ DEFAULT_SECRETS_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '
 REGISTRY_FILE = 'post_hoc_modified_aSAH_DATA_2009_2023_24122023.xlsx'
 OUTCOMES_FILE = 'outcomes_aSAH_DATA_2009_2024_18122024.xlsx'
 DCI_TIMINGS_FILE = 'dci_timings_19092026_joint.xlsx'
+PCT_COUNTS_FILE = 'Number_of_pCTs.xlsx'
+
+# pCT file names the patient column 'Name_corrected'; other sources use 'Name'
+PCT_COUNTS_NAME_COLUMN = 'Name_corrected'
 
 # .secrets holds one password per line, e.g. line 1 -> outcomes file, line 2 -> registry
 OUTCOMES_PASSWORD_LINE = 0
@@ -25,6 +29,7 @@ class RawSources:
     registry: pd.DataFrame
     outcomes: pd.DataFrame
     dci_timings: pd.DataFrame
+    pct_counts: pd.DataFrame
 
 
 def _read_passwords(secrets_path: str) -> list[str]:
@@ -38,5 +43,6 @@ def load_sources(data_dir: str = DEFAULT_DATA_DIR, secrets_path: str = DEFAULT_S
     registry = load_encrypted_xlsx(os.path.join(data_dir, REGISTRY_FILE), password=passwords[REGISTRY_PASSWORD_LINE])
     outcomes = load_encrypted_xlsx(os.path.join(data_dir, OUTCOMES_FILE), password=passwords[OUTCOMES_PASSWORD_LINE])
     dci_timings = pd.read_excel(os.path.join(data_dir, DCI_TIMINGS_FILE))
+    pct_counts = pd.read_excel(os.path.join(data_dir, PCT_COUNTS_FILE)).rename(columns={PCT_COUNTS_NAME_COLUMN: 'Name'})
 
-    return RawSources(registry=registry, outcomes=outcomes, dci_timings=dci_timings)
+    return RawSources(registry=registry, outcomes=outcomes, dci_timings=dci_timings, pct_counts=pct_counts)
