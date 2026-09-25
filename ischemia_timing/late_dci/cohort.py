@@ -28,6 +28,11 @@ MALE_CODE = 'm'
 LANDMARK_DAY = 7.0
 FOLLOW_UP_CAP_DAY = 21.0
 
+PCT_COUNT_COLUMN = 'Number of perfusion CTs'
+# Perfusion findings recorded at DCI diagnosis; 'na' = not available, like a blank cell
+PERFUSION_METRICS = ['TTP_increase', 'TTD_increase', 'Tmax_increase', 'MTT_increased', 'CBV_reduced', 'CBF_reduced']
+NOT_AVAILABLE_MARKER = 'na'
+
 CORE_COVARIATES = ['age', 'male', 'hypertension', 'poor_wfns', 'fisher', 'active_smoker', 'aspirin', 'year']
 EXTRA_COVARIATES = ['alcohol', 'diabetes', 'statin', 'clopidogrel', 'oral_anticoagulation']
 EXTENDED_COVARIATES = CORE_COVARIATES + EXTRA_COVARIATES
@@ -188,6 +193,12 @@ def build_patients(sources: RawSources) -> pd.DataFrame:
         patients[covariate] = pd.to_numeric(reg(registry_column), errors='coerce')
 
     patients['year'] = ictus.dt.year.astype(float)
+
+    # Imaging use: perfusion CTs per patient, and whether each perfusion metric was reported
+    patients['n_pct'] = pd.to_numeric(_lookup(sources.pct_counts, PCT_COUNT_COLUMN, timings), errors='coerce')
+    for metric in PERFUSION_METRICS:
+        patients[f'{metric}_available'] = timings[metric].notna() & (timings[metric] != NOT_AVAILABLE_MARKER)
+
     return patients
 
 
