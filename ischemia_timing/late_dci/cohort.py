@@ -28,6 +28,9 @@ MALE_CODE = 'm'
 LANDMARK_DAY = 7.0
 FOLLOW_UP_CAP_DAY = 21.0
 
+# Study period starts in 2011; 2009-2010 excluded
+FIRST_INCLUDED_YEAR = 2011
+
 PCT_COUNT_COLUMN = 'Number of perfusion CTs'
 # Perfusion findings recorded at DCI diagnosis; 'na' = not available, like a blank cell
 PERFUSION_METRICS = ['TTP_increase', 'TTD_increase', 'Tmax_increase', 'MTT_increased', 'CBV_reduced', 'CBF_reduced']
@@ -210,6 +213,7 @@ def select(patients: pd.DataFrame, analysis_set: AnalysisSet, covariates: list[s
     criteria = [
         ('DCI status known', patients['dci_status_known']),
         ('ictus date known', patients['ictus_source'] != 'missing'),
+        (f'ictus in or after {FIRST_INCLUDED_YEAR}', patients['year'] >= FIRST_INCLUDED_YEAR),
         ('DCI onset date valid', dci_onset_valid),
         ('death status known', death_known),
         ('discharge date known', patients['t_discharge'].notna()),
