@@ -25,6 +25,12 @@ ACTIVE_SMOKER_CODE = 1
 FISHER_MISSING_MARKERS = {'x': pd.NA, 'nan': pd.NA}
 OUTCOME_COLUMNS = ['mRS_discharge', 'mRS_FU_1y']
 
+# Visit behind mRS_FU_1y, e.g. '2y' when the 1-year score is missing; 'death' when set to 6
+FOLLOW_UP_VISITS = {'1y': ('mRS_FU_1y', 'Date_FU_1y'), '2y': ('mRS_2FU_2y', 'Date_2FU_2y'), '5y': ('mRS_3FU_5y', 'Date_3FU_5y')}
+FOLLOW_UP_DEATH = 'death'
+FOLLOW_UP_COLUMNS = ['mRS_FU_source', 'Date_FU_used']
+LINKED_COLUMNS = OUTCOME_COLUMNS + FOLLOW_UP_COLUMNS
+
 # Earlier CVS detection dates fill a missing start date, in this order
 CVS_DATE_FALLBACKS = ['Date_CVS_DSA', 'Date_CVS_CTA', 'Date_CVS_TCD']
 
@@ -63,9 +69,17 @@ def _name_birth_key(frame: pd.DataFrame) -> pd.Series:
 def _prepare_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
     outcomes = outcomes.copy()
 
+    # Earliest visit with a score wins, as in the fill below; raw date kept, e.g. '14/08/2023'
+    outcomes[FOLLOW_UP_COLUMNS] = pd.NA
+    for source, (score, date) in reversed(FOLLOW_UP_VISITS.items()):
+        scored = outcomes[score].notna()
+        outcomes.loc[scored, 'mRS_FU_source'] = source
+        outcomes.loc[scored, 'Date_FU_used'] = outcomes.loc[scored, date]
+
     # 1-year mRS: else 2-year, else 5-year; in-hospital death -> 6
     outcomes['mRS_FU_1y'] = outcomes['mRS_FU_1y'].fillna(outcomes['mRS_2FU_2y']).fillna(outcomes['mRS_3FU_5y'])
     outcomes.loc[outcomes['mRS_discharge'] == DEAD_MRS, 'mRS_FU_1y'] = DEAD_MRS
+    outcomes.loc[outcomes['mRS_discharge'] == DEAD_MRS, FOLLOW_UP_COLUMNS] = [FOLLOW_UP_DEATH, pd.NA]
 
     for column in OUTCOME_COLUMNS:
         outcomes[column] = pd.to_numeric(outcomes[column], errors='coerce')
@@ -75,7 +89,7 @@ def _prepare_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
 def _outcome_lookup(outcomes: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
     """Outcome columns for every registry row: by SOS ID, else by name + birth date; duplicate keys -> NaN."""
     def unique_by(key: pd.Series) -> pd.DataFrame:
-        keyed = outcomes[OUTCOME_COLUMNS].set_index(key)
+        keyed = outcomes[LINKED_COLUMNS].set_index(key)
         keyed = keyed[keyed.index.notna()]
         return keyed[~keyed.index.duplicated(keep=False)]
 
@@ -113,10 +127,11 @@ def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame) -> pd.Data
     registry['los'] = (_dates(registry['Date_Discharge']) - admission).dt.days
     registry['los_icu'] = (_dates(registry['Date_discharge_ICU']) - admission).dt.days
 
-    registry[OUTCOME_COLUMNS] = _outcome_lookup(outcomes, registry)
+    registry[LINKED_COLUMNS] = _outcome_lookup(outcomes, registry)
 
     # Death after discharge (registry) -> 1-year mRS 6
     registry.loc[registry['Death'] == YES, 'mRS_FU_1y'] = DEAD_MRS
+    registry.loc[registry['Death'] == YES, FOLLOW_UP_COLUMNS] = [FOLLOW_UP_DEATH, pd.NA]
     return registry
 
 
