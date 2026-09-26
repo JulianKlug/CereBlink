@@ -15,6 +15,8 @@ REGISTRY_FILE = 'post_hoc_modified_aSAH_DATA_2009_2023_24122023.xlsx'
 OUTCOMES_FILE = 'outcomes_aSAH_DATA_2009_2024_18122024.xlsx'
 DCI_TIMINGS_FILE = 'dci_timings_19092026_joint.xlsx'
 PCT_COUNTS_FILE = 'Number_of_pCTs.xlsx'
+CT_ACQUISITIONS_FILE = os.path.join('extracted_data', '20240207_SAH_SOS_CT.csv')
+REGISTRY_PDMS_CORRESPONDENCE_FILE = 'registry_pdms_correspondence.csv'
 
 # pCT file names the patient column 'Name_corrected'; other sources use 'Name'
 PCT_COUNTS_NAME_COLUMN = 'Name_corrected'
@@ -46,3 +48,15 @@ def load_sources(data_dir: str = DEFAULT_DATA_DIR, secrets_path: str = DEFAULT_S
     pct_counts = pd.read_excel(os.path.join(data_dir, PCT_COUNTS_FILE)).rename(columns={PCT_COUNTS_NAME_COLUMN: 'Name'})
 
     return RawSources(registry=registry, outcomes=outcomes, dci_timings=dci_timings, pct_counts=pct_counts)
+
+
+def load_ct_acquisitions(data_dir: str = DEFAULT_DATA_DIR) -> pd.DataFrame:
+    """One row per ICU CT (PDMS) with registry identifiers: SOS ID, Name, Date_birth, ct_time."""
+    cts = pd.read_csv(os.path.join(data_dir, CT_ACQUISITIONS_FILE), sep=';', decimal='.')
+    correspondence = pd.read_csv(os.path.join(data_dir, REGISTRY_PDMS_CORRESPONDENCE_FILE))
+    correspondence['Date_birth'] = pd.to_datetime(correspondence['Date_birth'], format='%d.%m.%Y')
+
+    # PDMS patient number (pNr) -> registry identity (SOS ID, name, birth date)
+    cts = cts.merge(correspondence, on='pNr', how='left').rename(columns={'JoinedName': 'Name'})
+    cts['ct_time'] = pd.to_datetime(cts['timeAktion'], errors='coerce')
+    return cts[['SOS-CENTER-YEAR-NO.', 'Name', 'Date_birth', 'ct_time']]
