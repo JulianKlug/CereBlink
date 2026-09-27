@@ -256,9 +256,10 @@ def hodges_lehmann(x: np.ndarray, y: np.ndarray) -> tuple[float, float, float]:
     differences = np.sort(np.subtract.outer(np.asarray(x), np.asarray(y)).ravel())
     m, n = len(x), len(y)
 
-    # Rank of the lower limit among the m * n differences, normal approximation to the U distribution
-    k = max(int(np.floor(m * n / 2 - Z_95 * np.sqrt(m * n * (m + n + 1) / 12))), 0)
-    return float(np.median(differences)), float(differences[k]), float(differences[m * n - 1 - k])
+    # Limits are the k-th smallest and k-th largest differences (1-based, Hollander-Wolfe);
+    # k from the normal approximation to the U distribution, e.g. m = 12, n = 10 -> k = 30
+    k = max(int(np.floor(m * n / 2 - Z_95 * np.sqrt(m * n * (m + n + 1) / 12))), 1)
+    return float(np.median(differences)), float(differences[k - 1]), float(differences[m * n - k])
 
 
 def _median_regression(data: pd.DataFrame, formula: str, term: str) -> tuple[float, float, float]:

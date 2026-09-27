@@ -106,3 +106,11 @@ def test_late_tail_uses_day_14():
     distribution = dci_triggers.late_tail(patients).distribution.set_index('group')
 
     assert distribution.loc['all DCI', 'n_late'] == 2
+
+
+def test_hodges_lehmann_ci_matches_exact_moses_interval():
+    # R wilcox.test(x, y, conf.int = TRUE, exact = TRUE): lower = 30th smallest difference, upper = 91st
+    x = np.array([1.1, 2.3, 3.7, 4.2, 5.9, 6.4, 7.8, 8.5, 9.6, 10.3, 11.9, 12.2])
+    y = np.array([0.4, 1.8, 2.9, 3.1, 4.6, 5.2, 6.7, 7.3, 8.9, 9.1])
+    estimate, lower, upper = dci_triggers.hodges_lehmann(x, y)
+    assert (estimate, round(lower, 6), round(upper, 6)) == (1.9, -1.1, 5.4)
