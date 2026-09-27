@@ -19,6 +19,10 @@ from .data_sources import RawSources
 from .table1 import ID, YearFilter, select_registry
 
 SECONDS_PER_DAY = 86400
+
+# Tails reported in the Results, e.g. 'DCI before day 5 in 5 patients, after day 21 in 3'
+EARLY_TAIL_DAY = 5
+LATE_TAIL_DAY = 21
 REGISTRY_KEYS = [ID, 'Name', 'Date_birth']
 
 VASOSPASM = 'Vasospasm'
@@ -86,12 +90,14 @@ def build_figure1_data(sources: RawSources, ct_acquisitions: pd.DataFrame, year_
 
 
 def summarise(events: pd.DataFrame, cts: pd.Series) -> pd.DataFrame:
-    """n, median (Q1-Q3) and 95th percentile of days from ictus per distribution."""
+    """n, median (Q1-Q3), 95th percentile and tail counts (before day 5, after day 21) of days from ictus."""
     rows = []
     for name, days in [*events.items(), (CT, cts)]:
         days = days.dropna()
         rows.append({'distribution': name, 'n': len(days), 'median': days.median(), 'q1': days.quantile(0.25),
-                     'q3': days.quantile(0.75), 'p95': days.quantile(0.95)})
+                     'q3': days.quantile(0.75), 'p95': days.quantile(0.95),
+                     f'n_before_day_{EARLY_TAIL_DAY}': int((days < EARLY_TAIL_DAY).sum()),
+                     f'n_after_day_{LATE_TAIL_DAY}': int((days > LATE_TAIL_DAY).sum())})
     return pd.DataFrame(rows)
 
 

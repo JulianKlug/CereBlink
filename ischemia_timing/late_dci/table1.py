@@ -21,6 +21,7 @@ ID = 'SOS-CENTER-YEAR-NO.'
 DEAD_MRS = 6
 MALE_CODES = ['M', 'm']
 YES = 1
+NO = 0
 ACTIVE_SMOKER_CODE = 1
 FISHER_MISSING_MARKERS = {'x': pd.NA, 'nan': pd.NA}
 OUTCOME_COLUMNS = ['mRS_discharge', 'mRS_FU_1y']
@@ -30,6 +31,11 @@ FOLLOW_UP_VISITS = {'1y': ('mRS_FU_1y', 'Date_FU_1y'), '2y': ('mRS_2FU_2y', 'Dat
 FOLLOW_UP_DEATH = 'death'
 FOLLOW_UP_COLUMNS = ['mRS_FU_source', 'Date_FU_used']
 LINKED_COLUMNS = OUTCOME_COLUMNS + FOLLOW_UP_COLUMNS
+
+# DCI status and image dates / times, taken from the verified DCI timings file instead of the registry
+DCI_DATE_COLUMNS = ['Date_DCI_ischemia_first_image', 'Time_DCI_ischemia_first_image',
+                    'Date_DCI_infarct_first_image', 'Time_DCI_infarct_first_image']
+DCI_VERIFIED = 'DCI_YN_verified'
 
 # Earlier CVS detection dates fill a missing start date, in this order
 CVS_DATE_FALLBACKS = ['Date_CVS_DSA', 'Date_CVS_CTA', 'Date_CVS_TCD']
@@ -86,10 +92,10 @@ def _prepare_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
     return outcomes
 
 
-def _outcome_lookup(outcomes: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
-    """Outcome columns for every registry row: by SOS ID, else by name + birth date; duplicate keys -> NaN."""
+def _outcome_lookup(outcomes: pd.DataFrame, registry: pd.DataFrame, columns: list[str] = LINKED_COLUMNS) -> pd.DataFrame:
+    """`columns` of `outcomes` for every registry row: by SOS ID, else by name + birth date; duplicate keys -> NaN."""
     def unique_by(key: pd.Series) -> pd.DataFrame:
-        keyed = outcomes[LINKED_COLUMNS].set_index(key)
+        keyed = outcomes[columns].set_index(key)
         keyed = keyed[keyed.index.notna()]
         return keyed[~keyed.index.duplicated(keep=False)]
 
@@ -101,8 +107,24 @@ def _outcome_lookup(outcomes: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFr
     return matched_by_id.where(registry[ID].notna(), matched_by_key)
 
 
-def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame) -> pd.DataFrame:
+def timings_dci_dates(timings: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
+    """DCI image dates / times of the timings file for every registry row; blank unless DCI verified.
+
+    e.g. registry DCI on 01.01.2015, timings (verified) 05.01.2015 -> 05.01.2015; not verified -> blank.
+    """
+    verified = timings.assign(**{column: timings[column].where(timings[DCI_VERIFIED] == YES) for column in DCI_DATE_COLUMNS})
+    return _outcome_lookup(verified, registry, DCI_DATE_COLUMNS)
+
+
+def timings_dci_status(timings: pd.DataFrame, registry: pd.DataFrame) -> pd.Series:
+    """Verified DCI status (1 / 0) of the timings file for every registry row; absent from timings -> NaN."""
+    return _outcome_lookup(timings, registry, [DCI_VERIFIED])[DCI_VERIFIED]
+
+
+def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame, timings: pd.DataFrame) -> pd.DataFrame:
     registry = registry.copy()
+    registry[DCI_DATE_COLUMNS] = timings_dci_dates(timings, registry)
+    registry['DCI_ischemia'] = timings_dci_status(timings, registry)
 
     # CVS start: first available detection date; a dated CVS implies CVS_YN = 1
     for fallback in CVS_DATE_FALLBACKS:
@@ -141,7 +163,26 @@ def select_registry(sources: RawSources, year_filter: YearFilter, first_year: in
     keep = admission.notna()
     if year_filter == YearFilter.STUDY_PERIOD:
         keep &= admission >= f'{first_year}-01-01'
-    return _prepare_registry(sources.registry[keep], _prepare_outcomes(sources.outcomes))
+    return _prepare_registry(sources.registry[keep], _prepare_outcomes(sources.outcomes), sources.dci_timings)
+
+
+def population_flow(registry: pd.DataFrame, timings: pd.DataFrame, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
+    """Patients remaining after each selection step of Table 1, then split by verified DCI status.
+
+    e.g. 488 registry rows -> 460 with admission date -> 408 from 2011 -> 392 with verified status (109 DCI, 283 no DCI).
+    """
+    admission = registry['Date_admission']
+    keep = admission.notna()
+    steps = [('registry rows', len(registry)), ('admission date known', int(keep.sum()))]
+
+    if year_filter == YearFilter.STUDY_PERIOD:
+        keep &= admission >= f'{first_year}-01-01'
+        steps.append((f'admission from {first_year}', int(keep.sum())))
+
+    status = timings_dci_status(timings, registry[keep])
+    steps += [('verified DCI status known', int(status.notna().sum())),
+              ('  DCI', int((status == YES).sum())), ('  no DCI', int((status == NO).sum()))]
+    return pd.DataFrame(steps, columns=['step', 'n'])
 
 
 def _with_missing(text: str, n_missing: int) -> str:
