@@ -63,3 +63,17 @@ def test_population_flow_counts_each_step():
     flow = table1.population_flow(registry, timings, table1.YearFilter.STUDY_PERIOD, 2011).set_index('step')['n']
 
     assert flow.tolist() == [5, 4, 3, 2, 1, 1]
+
+
+def test_negative_registry_age_recomputed_from_birth_date():
+    # Age -45 is a sign error; recomputed from birth date to ictus (admission if ictus unknown)
+    registry = pd.DataFrame({
+        'Age': [50.0, -45.0, -45.0],
+        'Date_birth': pd.to_datetime(['1965-01-01', '1970-01-01', '1970-01-01']),
+        'Date_Ictus': pd.to_datetime(['2015-01-01', '2015-01-01', None]),
+        'Date_admission': pd.to_datetime(['2015-01-01', '2015-01-01', '2015-07-01']),
+    })
+
+    age = table1._age(registry)
+
+    assert age.round(1).tolist() == [50.0, 45.0, 45.5]

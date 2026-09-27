@@ -19,6 +19,7 @@ from .data_sources import RawSources
 
 ID = 'SOS-CENTER-YEAR-NO.'
 DEAD_MRS = 6
+DAYS_PER_YEAR = 365.25
 MALE_CODES = ['M', 'm']
 YES = 1
 NO = 0
@@ -121,10 +122,19 @@ def timings_dci_status(timings: pd.DataFrame, registry: pd.DataFrame) -> pd.Seri
     return _outcome_lookup(timings, registry, [DCI_VERIFIED])[DCI_VERIFIED]
 
 
+def _age(registry: pd.DataFrame) -> pd.Series:
+    # Negative registry age = sign error, e.g. -45 -> recomputed from birth date to ictus (admission if unknown)
+    ictus = _dates(registry['Date_Ictus']).fillna(_dates(registry['Date_admission']))
+    from_birth = (ictus - pd.to_datetime(registry['Date_birth'], errors='coerce')).dt.days / DAYS_PER_YEAR
+    age = pd.to_numeric(registry['Age'], errors='coerce')
+    return age.where(age >= 0, from_birth)
+
+
 def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame, timings: pd.DataFrame) -> pd.DataFrame:
     registry = registry.copy()
     registry[DCI_DATE_COLUMNS] = timings_dci_dates(timings, registry)
     registry['DCI_ischemia'] = timings_dci_status(timings, registry)
+    registry['Age'] = _age(registry)
 
     # CVS start: first available detection date; a dated CVS implies CVS_YN = 1
     for fallback in CVS_DATE_FALLBACKS:
