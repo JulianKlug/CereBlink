@@ -51,10 +51,22 @@ def _dates(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series.map(_date), errors='coerce')
 
 
+def _time_of_day(value) -> pd.Timedelta:
+    # e.g. '12:00', ' 16:26:00', '1900-01-01 18:00:00' or time(18, 0); missing or unparsable -> midnight
+    if isinstance(value, dt.time):
+        return pd.Timedelta(hours=value.hour, minutes=value.minute, seconds=value.second)
+    if pd.isna(value):
+        return pd.Timedelta(0)
+
+    parsed = pd.to_datetime(str(value).strip(), format='mixed', errors='coerce')
+    if pd.isna(parsed):
+        return pd.Timedelta(0)
+    return parsed - parsed.normalize()
+
+
 def _date_time(dates: pd.Series, times: pd.Series) -> pd.Series:
-    # Image date + time of day, e.g. '14.03.2011' + ' 16:26:00'; missing time -> midnight
-    time_of_day = pd.to_timedelta(times.astype(str).str.strip(), errors='coerce').fillna(pd.Timedelta(0))
-    return _dates(dates) + time_of_day
+    # Image date + time of day, e.g. '14.03.2011' + ' 16:26:00'
+    return _dates(dates) + pd.to_timedelta(times.map(_time_of_day))
 
 
 def _days_after(ictus: pd.Series, event: pd.Series) -> pd.Series:
