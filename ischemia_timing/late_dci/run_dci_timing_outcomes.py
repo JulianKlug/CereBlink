@@ -21,9 +21,9 @@ from .table1 import YearFilter
 DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'results', 'dci_timing_outcomes'))
 FLOAT_FORMAT = '.3f'
 
-NOT_ANALYSED = (
-    'Editor critical 1 (clinical vs surrogate DCI ascertainment) is not analysed: the ascertainment '
-    'columns of the DCI timings file are still being extracted.'
+ASCERTAINMENT = (
+    'Editor critical 1 (clinical vs surrogate DCI ascertainment) is analysed separately: '
+    'run_dci_triggers, results/dci_triggers.'
 )
 
 
@@ -62,7 +62,7 @@ def run(data_dir: str, secrets_path: str, output_dir: str, year_filter: YearFilt
     period = f'admission from {FIRST_INCLUDED_YEAR}' if year_filter == YearFilter.STUDY_PERIOD else 'all admission years'
     with open(os.path.join(output_dir, 'results.md'), 'w') as file:
         file.write(f'# DCI timing and outcomes\n\nKSSG registry, {period}; {len(data)} DCI patients with onset date.\n\n')
-        file.write('\n'.join(sections) + f'\n## Not analysed\n\n{NOT_ANALYSED}\n')
+        file.write('\n'.join(sections) + f'\n## DCI ascertainment\n\n{ASCERTAINMENT}\n')
 
 
 def main() -> None:

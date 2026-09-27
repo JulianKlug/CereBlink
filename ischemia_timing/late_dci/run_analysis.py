@@ -27,7 +27,7 @@ SENSITIVITY_LANDMARKS = [5.0, 10.0]
 FLOAT_FORMAT = '.3f'
 FIGURE_DPI = 300
 
-# Figure 3 labels, top to bottom
+# Forest plot labels, top to bottom
 FOREST_LABELS = {
     'age': 'Age (per year)',
     'male': 'Sex (male)',
@@ -107,7 +107,7 @@ def _plot_cumulative_incidence(overall: pd.DataFrame, by_wfns: pd.DataFrame, pat
 
 
 def _plot_forest(model: pd.DataFrame, path: str) -> None:
-    """Figure 3: primary-model HRs on a log axis, estimate columns on the right."""
+    """Forest plot: primary-model HRs on a log axis, estimate columns on the right."""
     rows = model.set_index('covariate').loc[list(FOREST_LABELS)]
     y = range(len(rows))[::-1]
 
