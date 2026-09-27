@@ -36,6 +36,15 @@ PCT_COUNT_COLUMN = 'Number of perfusion CTs'
 PERFUSION_METRICS = ['TTP_increase', 'TTD_increase', 'Tmax_increase', 'MTT_increased', 'CBV_reduced', 'CBF_reduced']
 NOT_AVAILABLE_MARKER = 'na'
 
+# Circumstances of DCI diagnosis (0 = no, 1 = yes, blank = not recorded)
+CLINICAL_ASSESSABILITY = 'clinically_assessable'
+PCT_VERIFICATION = 'CTP_verification'
+CLINICAL_SIGNS = ['decreased_consciousness', 'focal_neuro_signs']
+PCT_TRIGGERS = ['unexplained_persisting_DoC_or_deficit', 'delirium', 'raised_icp', 'suspect_TCD',
+                'decreased_ptio2', 'suspect_microdialysis', 'decreased_NIRS']
+RECURRENCE = 'DCI_recurrence'
+DIAGNOSIS_FIELDS = [CLINICAL_ASSESSABILITY, PCT_VERIFICATION] + CLINICAL_SIGNS + PCT_TRIGGERS + [RECURRENCE]
+
 CORE_COVARIATES = ['age', 'male', 'hypertension', 'poor_wfns', 'fisher', 'active_smoker', 'aspirin', 'year']
 EXTRA_COVARIATES = ['alcohol', 'diabetes', 'statin', 'clopidogrel', 'oral_anticoagulation']
 EXTENDED_COVARIATES = CORE_COVARIATES + EXTRA_COVARIATES
@@ -201,6 +210,10 @@ def build_patients(sources: RawSources) -> pd.DataFrame:
     patients['n_pct'] = pd.to_numeric(_lookup(sources.pct_counts, PCT_COUNT_COLUMN, timings), errors='coerce')
     for metric in PERFUSION_METRICS:
         patients[f'{metric}_available'] = timings[metric].notna() & (timings[metric] != NOT_AVAILABLE_MARKER)
+
+    # Circumstances of DCI diagnosis; codes other than 0 / 1 -> not recorded
+    for field in DIAGNOSIS_FIELDS:
+        patients[field] = pd.to_numeric(timings[field], errors='coerce').where(lambda v: v.isin([0, 1]))
 
     return patients
 
