@@ -19,11 +19,13 @@ import pandas as pd
 
 from . import analyses
 from .cohort import (CORE_COVARIATES, EXTENDED_COVARIATES, LANDMARK_DAY, AnalysisSet, FollowUpEnd,
-                     build_landmark_dataset, build_patients, build_piecewise_dataset, select)
+                     build_landmark_dataset, build_patients, build_piecewise_dataset, linkage_counts, select,
+                     split_landmark_dataset)
 from .data_sources import DEFAULT_DATA_DIR, DEFAULT_SECRETS_PATH, load_sources
 
 DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'results', 'late_dci'))
 SENSITIVITY_LANDMARKS = [5.0, 10.0]
+ASPIRIN_SPLIT_DAY = 14.0  # aspirin HR in days 8-14 vs 15-21 (non-proportional hazards)
 FLOAT_FORMAT = '.3f'
 FIGURE_DPI = 300
 
@@ -173,7 +175,8 @@ def run(data_dir: str, secrets_path: str, output_dir: str) -> None:
     report = Report(output_dir)
 
     # Cohorts
-    patients = build_patients(load_sources(data_dir, secrets_path))
+    sources = load_sources(data_dir, secrets_path)
+    patients = build_patients(sources)
     full = select(patients, AnalysisSet.FULL_COHORT)
     complete = select(patients, AnalysisSet.COMPLETE_CASE, CORE_COVARIATES)
     complete_extended = select(patients, AnalysisSet.COMPLETE_CASE, EXTENDED_COVARIATES)
@@ -183,6 +186,7 @@ def run(data_dir: str, secrets_path: str, output_dir: str) -> None:
     risk_set = landmark.dataset
 
     report.table('data_quality', 'Data sources and quality', _data_quality(patients))
+    report.table('linkage', 'Record linkage (timings rows)', linkage_counts(sources))
     flow = _flow_table({
         'full cohort': _flow(full.flow, landmark_full.flow),
         'complete case': _flow(complete.flow, landmark.flow),
@@ -196,8 +200,13 @@ def run(data_dir: str, secrets_path: str, output_dir: str) -> None:
     by_wfns.to_csv(os.path.join(output_dir, 'cumulative_incidence_by_wfns.csv'), index=False)
     _plot_cumulative_incidence(overall, by_wfns, os.path.join(output_dir, 'cumulative_incidence.png'))
     day21 = overall.iloc[-1]
+    discharge_competing = analyses.cumulative_incidence_discharge_competing(landmark_full.dataset)
+    discharge_competing.to_csv(os.path.join(output_dir, 'cumulative_incidence_discharge_competing.csv'), index=False)
+    day21_discharge = discharge_competing.iloc[-1]
     report.text('Cumulative incidence at day 21 (full cohort)',
-                f'Late DCI {day21["cif_event"]:.3f}, competing death {day21["cif_competing"]:.3f}. '
+                f'Late DCI {day21["cif_event"]:.3f}, competing death {day21["cif_competing"]:.3f}; alive discharge '
+                f'censored. With alive discharge before day 21 as a competing event: late in-hospital DCI '
+                f'{day21_discharge["cif_event"]:.3f}, death or alive discharge {day21_discharge["cif_competing"]:.3f}. '
                 'Figure: `cumulative_incidence.png`.')
 
     # Primary model
@@ -218,6 +227,10 @@ def run(data_dir: str, secrets_path: str, output_dir: str) -> None:
     # Early vs late
     report.table('piecewise', 'Piecewise Cox from ictus, split at day 7 (ratio = HR after / HR before)',
                  analyses.piecewise_contrast(build_piecewise_dataset(complete.patients)))
+    aspirin_rows = split_landmark_dataset(risk_set, ASPIRIN_SPLIT_DAY - LANDMARK_DAY)
+    report.table('aspirin_time_varying',
+                 f'Aspirin: HR up to vs after day {ASPIRIN_SPLIT_DAY:g} (primary model; ratio = HR after / HR before)',
+                 analyses.piecewise_contrast(aspirin_rows, ['aspirin']))
     landmark_tables = []
     for landmark_day in SENSITIVITY_LANDMARKS:
         data = build_landmark_dataset(complete.patients, landmark_day=landmark_day).dataset

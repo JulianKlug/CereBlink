@@ -110,12 +110,12 @@ def hypertension_aspirin_association(dataset: pd.DataFrame) -> pd.DataFrame:
     return table.assign(odds_ratio_htn_aspirin=odds_ratio, fisher_p=p)
 
 
-def piecewise_contrast(piecewise_rows: pd.DataFrame) -> pd.DataFrame:
+def piecewise_contrast(piecewise_rows: pd.DataFrame, split_covariates: list[str] = PIECEWISE_COVARIATES) -> pd.DataFrame:
     """HR before vs after the split for selected covariates; ratio of HRs with 95% CI."""
     data = piecewise_rows.copy()
     covariates = []
     for covariate in CORE_COVARIATES:
-        if covariate not in PIECEWISE_COVARIATES:
+        if covariate not in split_covariates:
             covariates.append(covariate)
             continue
         data[f'{covariate}_early'] = data[covariate] * (1 - data['late_period'])
@@ -129,7 +129,7 @@ def piecewise_contrast(piecewise_rows: pd.DataFrame) -> pd.DataFrame:
     variance = pd.DataFrame(np.asarray(fitter.variance_matrix_), index=params.index, columns=params.index)
 
     rows = []
-    for covariate in PIECEWISE_COVARIATES:
+    for covariate in split_covariates:
         early, late = f'{covariate}_early', f'{covariate}_late'
         log_ratio = params[late] - params[early]
         se = np.sqrt(variance.loc[late, late] + variance.loc[early, early] - 2 * variance.loc[late, early])
@@ -255,6 +255,16 @@ def model_check(dataset: pd.DataFrame, covariates: list[str]) -> ModelCheck:
 
     calibration = cr.calibration_by_group(dataset['time'], dataset['event'], risk, HORIZON, CALIBRATION_GROUPS)
     return ModelCheck(metrics=metrics, calibration=calibration)
+
+
+def cumulative_incidence_discharge_competing(dataset: pd.DataFrame) -> pd.DataFrame:
+    """Aalen-Johansen curves of late in-hospital DCI with death or alive discharge before the cap as competing event.
+
+    Example: discharged alive at time 5 -> competing; censored at the cap (time 14) -> censored.
+    """
+    discharged_alive = (dataset['event'] == Event.CENSORED) & (dataset['time'] < HORIZON)
+    event = np.where(discharged_alive | (dataset['event'] == Event.DEATH), cr.COMPETING, dataset['event'])
+    return cr.aalen_johansen(dataset['time'], pd.Series(event, index=dataset.index)).assign(group='all')
 
 
 def cumulative_incidence(dataset: pd.DataFrame, group_column: str | None = None) -> pd.DataFrame:

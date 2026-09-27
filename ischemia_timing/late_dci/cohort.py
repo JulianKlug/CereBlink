@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 
 from .data_sources import RawSources
+from .linkage import link
 
 ID = 'SOS-CENTER-YEAR-NO.'
 MISSING_MARKER = 'none'
@@ -123,21 +124,20 @@ def _days_between(start: pd.Series, end: pd.Series) -> pd.Series:
     return (end - start).dt.total_seconds() / SECONDS_PER_DAY
 
 
-def _name_birth_key(frame: pd.DataFrame) -> pd.Series:
-    # Fallback join key for rows without an SOS ID, e.g. 'jane doe|1960-01-31'
-    name = frame['Name'].astype(str).str.strip().str.lower()
-    birth = pd.to_datetime(frame['Date_birth'], errors='coerce').dt.date.astype(str)
-    return name + '|' + birth
-
-
 def _lookup(source: pd.DataFrame, column: str, timings: pd.DataFrame) -> pd.Series:
-    """Value of `column` in `source` for every timings row: by SOS ID, else by name + birth date."""
-    by_id = source.dropna(subset=[ID]).drop_duplicates(ID).set_index(ID)[column]
-    by_key = source.assign(key=_name_birth_key(source)).drop_duplicates('key').set_index('key')[column]
+    """Value of `column` in `source` for every timings row (linkage rule of `linkage`)."""
+    return link(source, timings, [column]).values[column]
 
-    matched_by_id = timings[ID].map(by_id)
-    matched_by_key = _name_birth_key(timings).map(by_key)
-    return matched_by_id.where(timings[ID].notna(), matched_by_key)
+
+def linkage_counts(sources: RawSources) -> pd.DataFrame:
+    """Timings rows per match type when linking the registry, outcomes and pCT counts, e.g. SOS ID 470."""
+    timings = sources.dci_timings.reset_index(drop=True)
+    counts = [
+        link(sources.registry, timings, ['Date_Ictus']).counts().assign(source='registry'),
+        link(sources.outcomes, timings, ['mRS_discharge']).counts().assign(source='outcomes'),
+        link(sources.pct_counts, timings, [PCT_COUNT_COLUMN]).counts().assign(source='pCT counts'),
+    ]
+    return pd.concat(counts)[['source', 'match', 'n']]
 
 
 def build_patients(sources: RawSources) -> pd.DataFrame:
@@ -243,6 +243,11 @@ def select(patients: pd.DataFrame, analysis_set: AnalysisSet, covariates: list[s
     return Selection(patients=patients[keep].copy(), flow=pd.DataFrame(flow, columns=['step', 'n']))
 
 
+def _on_calendar_days(patients: pd.DataFrame) -> pd.DataFrame:
+    # Ictus, death and discharge are dates: DCI on its calendar day too, e.g. day 7 at 14:00 (7.58) -> 7
+    return patients.assign(t_dci=np.floor(patients['t_dci']))
+
+
 def _dci_before_death(patients: pd.DataFrame) -> pd.Series:
     no_death = patients['death'] != 1
     return patients['dci'] & (no_death | (patients['t_dci'] <= patients['t_death']))
@@ -256,9 +261,10 @@ def build_landmark_dataset(
 ) -> LandmarkData:
     """Patients alive, DCI-free and observed at the landmark; time counted from the landmark.
 
-    Example (landmark 7, cap 21): DCI on day 9.5 -> time 2.5, event DCI;
+    Example (landmark 7, cap 21): DCI on day 9 -> time 2, event DCI; DCI on day 7 at 14:00 -> excluded;
     discharged alive on day 30 -> time 14, censored.
     """
+    patients = _on_calendar_days(patients)
     end_column = 't_discharge' if follow_up_end == FollowUpEnd.HOSPITAL_DISCHARGE else 't_icu_discharge'
     follow_up_end_day = patients[end_column]
     observation_end = np.minimum(follow_up_end_day, np.inf if cap_day is None else cap_day)
@@ -295,6 +301,23 @@ def build_landmark_dataset(
     return LandmarkData(dataset=dataset, flow=flow)
 
 
+def split_landmark_dataset(dataset: pd.DataFrame, split_time: float) -> pd.DataFrame:
+    """Counting-process rows of a landmark dataset, split at `split_time` after the landmark; DCI is the event.
+
+    Example (landmark 7, split 7 = day 14): DCI at time 10 -> rows (0, 7] no event and (7, 10] event.
+    """
+    base = dataset.reset_index(drop=True).rename_axis('patient').reset_index()
+    base = base.assign(dci_event=(base['event'] == Event.DCI).astype(int))
+
+    early = base.assign(start=0.0, stop=np.minimum(base['time'], split_time),
+                        event=np.where(base['time'] <= split_time, base['dci_event'], 0), late_period=0)
+    late = base[base['time'] > split_time].assign(start=split_time, stop=lambda d: d['time'],
+                                                  event=lambda d: d['dci_event'], late_period=1)
+
+    rows = pd.concat([early, late], ignore_index=True)
+    return rows.drop(columns=['time', 'dci_event']).sort_values(['patient', 'start']).reset_index(drop=True)
+
+
 def build_piecewise_dataset(
     patients: pd.DataFrame,
     split_day: float = LANDMARK_DAY,
@@ -302,8 +325,9 @@ def build_piecewise_dataset(
 ) -> pd.DataFrame:
     """Counting-process rows from ictus, split at `split_day`; death censors (cause-specific).
 
-    Example (split 7): DCI on day 9.5 -> rows (0, 7] no event and (7, 9.5] event, late_period = 0 / 1.
+    Example (split 7): DCI on day 9 -> rows (0, 7] no event and (7, 9] event, late_period = 0 / 1.
     """
+    patients = _on_calendar_days(patients)
     observation_end = np.minimum(patients['t_discharge'], cap_day)
     dci_event = _dci_before_death(patients) & (patients['t_dci'] <= observation_end)
     death_first = ~dci_event & (patients['death'] == 1) & (patients['t_death'] <= observation_end)

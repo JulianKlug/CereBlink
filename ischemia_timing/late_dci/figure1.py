@@ -16,6 +16,7 @@ import pandas as pd
 import seaborn as sns
 
 from .data_sources import RawSources
+from .linkage import link
 from .table1 import ID, YearFilter, select_registry
 
 SECONDS_PER_DAY = 86400
@@ -23,7 +24,6 @@ SECONDS_PER_DAY = 86400
 # Tails reported in the Results, e.g. 'DCI before day 5 in 5 patients, after day 21 in 3'
 EARLY_TAIL_DAY = 5
 LATE_TAIL_DAY = 21
-REGISTRY_KEYS = [ID, 'Name', 'Date_birth']
 
 VASOSPASM = 'Vasospasm'
 DCI = 'DCI'
@@ -90,9 +90,13 @@ def event_days(registry: pd.DataFrame) -> pd.DataFrame:
 
 def ct_days(registry: pd.DataFrame, ct_acquisitions: pd.DataFrame) -> pd.Series:
     """Days from ictus to each ICU CT of the selected registry patients."""
-    registry = registry.assign(ictus=_ictus(registry))
-    cts = ct_acquisitions.merge(registry[REGISTRY_KEYS + ['ictus']], on=REGISTRY_KEYS, how='inner')
-    return _days_after(cts['ictus'], cts['ct_time']).rename(CT)
+    ictus = link(registry.assign(ictus=_ictus(registry)), ct_acquisitions, ['ictus']).values['ictus']
+    return _days_after(pd.to_datetime(ictus), ct_acquisitions['ct_time']).dropna().rename(CT)
+
+
+def ct_linkage_counts(registry: pd.DataFrame, ct_acquisitions: pd.DataFrame) -> pd.DataFrame:
+    """ICU CTs per match type; unmatched includes CTs of patients outside the selected registry rows."""
+    return link(registry, ct_acquisitions, [ID]).counts()
 
 
 def build_figure1_data(sources: RawSources, ct_acquisitions: pd.DataFrame, year_filter: YearFilter,

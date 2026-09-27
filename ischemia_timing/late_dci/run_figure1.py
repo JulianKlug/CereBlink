@@ -18,8 +18,8 @@ import matplotlib.pyplot as plt
 
 from .cohort import FIRST_INCLUDED_YEAR
 from .data_sources import DEFAULT_DATA_DIR, DEFAULT_SECRETS_PATH, load_ct_acquisitions, load_sources
-from .figure1 import build_figure1_data, plot_figure1, summarise
-from .table1 import YearFilter
+from .figure1 import build_figure1_data, ct_linkage_counts, plot_figure1, summarise
+from .table1 import YearFilter, select_registry
 
 DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', 'results', 'figure1'))
 FIGURE_NAME = 'figure1.png'
@@ -37,8 +37,10 @@ LEGEND = (
 
 def run(data_dir: str, secrets_path: str, output_dir: str, year_filter: YearFilter) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    events, cts = build_figure1_data(load_sources(data_dir, secrets_path), load_ct_acquisitions(data_dir),
-                                     year_filter, FIRST_INCLUDED_YEAR)
+    sources, ct_acquisitions = load_sources(data_dir, secrets_path), load_ct_acquisitions(data_dir)
+    events, cts = build_figure1_data(sources, ct_acquisitions, year_filter, FIRST_INCLUDED_YEAR)
+    linkage = ct_linkage_counts(select_registry(sources, year_filter, FIRST_INCLUDED_YEAR), ct_acquisitions)
+    linkage.to_csv(os.path.join(output_dir, 'ct_linkage.csv'), index=False)
 
     fig = plot_figure1(events, cts)
     fig.savefig(os.path.join(output_dir, FIGURE_NAME), dpi=FIGURE_DPI, bbox_inches='tight')

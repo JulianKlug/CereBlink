@@ -24,7 +24,7 @@ from statsmodels.miscmodels.ordinal_model import OrderedModel
 
 from .data_sources import RawSources
 from .figure1 import DCI, event_days
-from .table1 import DEAD_MRS, FOLLOW_UP_DEATH, FOLLOW_UP_VISITS, YearFilter, select_registry
+from .table1 import CLINICAL_ASSESSABILITY, DEAD_MRS, FOLLOW_UP_DEATH, FOLLOW_UP_VISITS, YES, YearFilter, select_registry
 
 DCI_DAY = 'dci_day'
 COVARIATES = ['age', 'male', 'wfns', 'fisher']
@@ -32,6 +32,9 @@ FAVOURABLE_MAX_MRS = 2
 CONFIDENCE = 0.95
 DAYS_PER_MONTH = 30.44
 FIT_MAX_ITERATIONS = 10000
+BEST_CASE_MRS = 0
+SURVIVAL_LANDMARK_DAYS = [14, 21]
+MAX_MRS_THRESHOLD = 5  # mRS > 5 = death
 
 
 class ModelSpec(Enum):
@@ -69,11 +72,18 @@ def build_outcome_data(sources: RawSources, year_filter: YearFilter, first_year:
     """One row per DCI patient with a DCI onset day: outcomes, covariates and sensitivity-analysis fields."""
     registry = select_registry(sources, year_filter, first_year)
     admission = pd.to_datetime(registry['Date_admission'])
+    ictus = pd.to_datetime(registry['Date_Ictus'].map(_date)).fillna(admission)
+    death_date = pd.to_datetime(registry['Date_Death'].map(_date)).where(registry['Death'] == YES)
     follow_up_date = pd.to_datetime(registry['Date_FU_used'].map(_date), errors='coerce')
 
     data = pd.DataFrame({
         DCI_DAY: event_days(registry)[DCI],
         'mrs': registry['mRS_FU_1y'],
+        # Extreme cases for missing mRS: all best, all worst
+        'mrs_missing_0': registry['mRS_FU_1y'].fillna(BEST_CASE_MRS),
+        'mrs_missing_6': registry['mRS_FU_1y'].fillna(DEAD_MRS),
+        'death_day': (death_date - ictus).dt.days,
+        CLINICAL_ASSESSABILITY: registry[CLINICAL_ASSESSABILITY],
         'mrs_discharge': registry['mRS_discharge'],
         'infarction': pd.to_numeric(registry['DCI_infarct'], errors='coerce').astype(float),  # bool -> 0/1
         'age': registry['Age'],
@@ -96,6 +106,8 @@ class _Fit:
     bse: pd.Series
     pvalues: pd.Series
     n: int
+    llf: float
+    aic: float
 
 
 def _fit(y: pd.Series, X: pd.DataFrame, family: _Family) -> _Fit:
@@ -103,7 +115,7 @@ def _fit(y: pd.Series, X: pd.DataFrame, family: _Family) -> _Fit:
         result = sm.Logit(y, sm.add_constant(X)).fit(disp=False, maxiter=FIT_MAX_ITERATIONS)
     else:
         result = OrderedModel(y, X, distr=family.value).fit(method='bfgs', disp=False, maxiter=FIT_MAX_ITERATIONS)
-    return _Fit(result.params, result.bse, result.pvalues, int(result.nobs))
+    return _Fit(result.params, result.bse, result.pvalues, int(result.nobs), result.llf, result.aic)
 
 
 def _odds_ratio(fit: _Fit, covariate: str) -> dict:
@@ -217,6 +229,17 @@ class Sensitivity:
     mrs_column: str = 'mrs'
 
 
+def alive_with_dci_by(day: int) -> Callable[[pd.DataFrame], pd.Series]:
+    """Patients alive at `day` with DCI by calendar day `day`, e.g. day 14: DCI on day 14 at 18:00 kept.
+
+    Removes the survival advantage of late DCI: every kept patient could have had DCI at any day up to `day`.
+    """
+    def select(data: pd.DataFrame) -> pd.Series:
+        alive = data['death_day'].isna() | (data['death_day'] > day)
+        return alive & (np.floor(data[DCI_DAY]) <= day)
+    return select
+
+
 VISIT_SOURCES = list(FOLLOW_UP_VISITS)
 ONE_YEAR_VISIT = VISIT_SOURCES[0]
 
@@ -235,6 +258,14 @@ SENSITIVITY_ANALYSES = [
                 list(Outcome), extra_covariates=['year']),
     Sensitivity('Documented ictus date only', 'Reviewer 2: uncertain ictus',
                 list(Outcome), select=lambda d: d['ictus_documented']),
+    Sensitivity('Clinically assessable at DCI diagnosis', 'Editor critical 1: clinical vs surrogate ascertainment',
+                [Outcome.MRS], select=lambda d: d[CLINICAL_ASSESSABILITY] == YES),
+    Sensitivity('Missing mRS set to 0 (best case)', 'Editor major 4: missing follow-up',
+                [Outcome.MRS], mrs_column='mrs_missing_0'),
+    Sensitivity('Missing mRS set to 6 (worst case)', 'Editor major 4: missing follow-up',
+                [Outcome.MRS], mrs_column='mrs_missing_6'),
+    *[Sensitivity(f'Alive at day {day} with DCI by day {day}', 'Editor critical 2: early death / immortal time',
+                  [Outcome.MRS], select=alive_with_dci_by(day)) for day in SURVIVAL_LANDMARK_DAYS],
 ]
 
 
@@ -249,11 +280,51 @@ def sensitivity(data: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def proportional_odds_check(data: pd.DataFrame) -> pd.DataFrame:
+    """OR per day of the ordinal model vs binary logistic models at each cumulative mRS threshold.
+
+    Proportional odds holds if the binary ORs are similar, e.g. 0.89 (ordinal) vs 0.88 at mRS > 2.
+    """
+    rows = [{'threshold': 'ordinal (all)', **adjusted_effect(data, Outcome.MRS, ModelSpec.ORDINAL_LOGIT, MissingMrs.EXCLUDED)}]
+    covariates = [DCI_DAY, *COVARIATES]
+    frame = data[['mrs', *covariates]].astype(float).dropna()
+
+    for threshold in range(MAX_MRS_THRESHOLD + 1):
+        y = (frame['mrs'] > threshold).astype(float)
+        row = {'threshold': f'mRS > {threshold}', 'outcome': Outcome.MRS.value, 'model': 'binary logistic',
+               'n': len(frame), 'n_events': int(y.sum())}
+        try:
+            row.update(_odds_ratio(_fit(y, frame[covariates], _Family.LOGIT), DCI_DAY))
+        except np.linalg.LinAlgError:
+            row.update({'OR_per_day': np.nan, 'lower': np.nan, 'upper': np.nan, 'p': np.nan})
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
+def linearity_check(data: pd.DataFrame) -> pd.DataFrame:
+    """Ordinal mRS model with a quadratic DCI-day term vs the linear model: likelihood-ratio test and AIC."""
+    covariates = [DCI_DAY, *COVARIATES]
+    frame = data[['mrs', *covariates]].astype(float).dropna()
+
+    # Centred square, e.g. DCI day 12 with mean 9 -> 9; reduces collinearity with the linear term
+    frame['dci_day_squared'] = (frame[DCI_DAY] - frame[DCI_DAY].mean()) ** 2
+    linear = _fit(frame['mrs'], frame[covariates], _Family.LOGIT_ORDERED)
+    quadratic = _fit(frame['mrs'], frame[[*covariates, 'dci_day_squared']], _Family.LOGIT_ORDERED)
+
+    lr = 2 * (quadratic.llf - linear.llf)
+    return pd.DataFrame([{'n': linear.n, 'aic_linear': linear.aic, 'aic_quadratic': quadratic.aic, 'lr_statistic': lr,
+                          'df': 1, 'p_lr': stats.chi2.sf(lr, 1),
+                          'quadratic_coefficient': quadratic.params['dci_day_squared'],
+                          'p_quadratic': quadratic.pvalues['dci_day_squared']}])
+
+
 def follow_up_missingness(data: pd.DataFrame) -> pd.DataFrame:
     """Editor major 4: is missing follow-up mRS associated with DCI timing? Logistic, OR per day."""
-    frame = data.assign(missing_mrs=data['mrs'].isna().astype(float))[['missing_mrs', DCI_DAY, *COVARIATES]].dropna()
+    data = data.assign(missing_mrs=data['mrs'].isna().astype(float))
     rows = []
     for label, covariates in [('crude', [DCI_DAY]), ('adjusted', [DCI_DAY, *COVARIATES])]:
+        # One model frame per model: the crude model keeps patients with incomplete covariates
+        frame = data[['missing_mrs', *covariates]].dropna()
         fit = _fit(frame['missing_mrs'], frame[covariates].astype(float), _Family.LOGIT)
         rows.append({'model': label, 'n': fit.n, 'n_missing': int(frame['missing_mrs'].sum()), **_odds_ratio(fit, DCI_DAY)})
     return pd.DataFrame(rows)

@@ -11,11 +11,13 @@ from __future__ import annotations
 from enum import Enum
 from typing import Callable, Optional
 
+import numpy as np
 import pandas as pd
 
 from utils.utils import safe_conversion_to_datetime
 
 from .data_sources import RawSources
+from .linkage import link
 
 ID = 'SOS-CENTER-YEAR-NO.'
 DEAD_MRS = 6
@@ -37,6 +39,7 @@ LINKED_COLUMNS = OUTCOME_COLUMNS + FOLLOW_UP_COLUMNS
 DCI_DATE_COLUMNS = ['Date_DCI_ischemia_first_image', 'Time_DCI_ischemia_first_image',
                     'Date_DCI_infarct_first_image', 'Time_DCI_infarct_first_image']
 DCI_VERIFIED = 'DCI_YN_verified'
+CLINICAL_ASSESSABILITY = 'clinically_assessable'
 
 # Earlier CVS detection dates fill a missing start date, in this order
 CVS_DATE_FALLBACKS = ['Date_CVS_DSA', 'Date_CVS_CTA', 'Date_CVS_TCD']
@@ -57,6 +60,13 @@ GROUP_DCI = 'DCI'
 GROUP_NO_DCI = 'No DCI'
 
 
+class Treatment(Enum):
+    ENDOVASCULAR = 'Endovascular only'
+    CLIPPING = 'Clipping only'
+    BOTH = 'Endovascular and clipping'
+    NONE = 'Neither'
+
+
 class YearFilter(Enum):
     STUDY_PERIOD = 'study period'
     ALL_YEARS = 'all years'
@@ -64,13 +74,6 @@ class YearFilter(Enum):
 
 def _dates(series: pd.Series) -> pd.Series:
     return pd.to_datetime(series.apply(safe_conversion_to_datetime), errors='coerce')
-
-
-def _name_birth_key(frame: pd.DataFrame) -> pd.Series:
-    # Fallback join key for rows without an SOS ID, e.g. 'jane doe|1960-01-31'
-    name = frame['Name'].astype(str).str.strip().str.lower()
-    birth = pd.to_datetime(frame['Date_birth'], errors='coerce').dt.date.astype(str)
-    return name + '|' + birth
 
 
 def _prepare_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
@@ -94,18 +97,8 @@ def _prepare_outcomes(outcomes: pd.DataFrame) -> pd.DataFrame:
 
 
 def _outcome_lookup(outcomes: pd.DataFrame, registry: pd.DataFrame, columns: list[str] = LINKED_COLUMNS) -> pd.DataFrame:
-    """`columns` of `outcomes` for every registry row: by SOS ID, else by name + birth date; duplicate keys -> NaN."""
-    def unique_by(key: pd.Series) -> pd.DataFrame:
-        keyed = outcomes[columns].set_index(key)
-        keyed = keyed[keyed.index.notna()]
-        return keyed[~keyed.index.duplicated(keep=False)]
-
-    by_id = unique_by(outcomes[ID])
-    by_key = unique_by(_name_birth_key(outcomes))
-
-    matched_by_id = by_id.reindex(registry[ID]).set_axis(registry.index)
-    matched_by_key = by_key.reindex(_name_birth_key(registry)).set_axis(registry.index)
-    return matched_by_id.where(registry[ID].notna(), matched_by_key)
+    """`columns` of `outcomes` for every registry row (linkage rule of `linkage`)."""
+    return link(outcomes, registry, columns).values
 
 
 def timings_dci_dates(timings: pd.DataFrame, registry: pd.DataFrame) -> pd.DataFrame:
@@ -122,6 +115,15 @@ def timings_dci_status(timings: pd.DataFrame, registry: pd.DataFrame) -> pd.Seri
     return _outcome_lookup(timings, registry, [DCI_VERIFIED])[DCI_VERIFIED]
 
 
+def _treatment(registry: pd.DataFrame) -> pd.Series:
+    # Endovascular (coiling / stenting) x clipping, e.g. coiling 1 + clipping 1 -> both; either unknown -> NaN
+    endovascular, clipping = registry['coiling'] == YES, registry['Clipping'] == YES
+    category = np.select([endovascular & clipping, endovascular, clipping],
+                         [Treatment.BOTH.value, Treatment.ENDOVASCULAR.value, Treatment.CLIPPING.value], Treatment.NONE.value)
+    known = registry['coiling'].notna() & registry['Clipping'].notna()
+    return pd.Series(category, index=registry.index).where(known)
+
+
 def _age(registry: pd.DataFrame) -> pd.Series:
     # Negative registry age = sign error, e.g. -45 -> recomputed from birth date to ictus (admission if unknown)
     ictus = _dates(registry['Date_Ictus']).fillna(_dates(registry['Date_admission']))
@@ -134,6 +136,10 @@ def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame, timings: p
     registry = registry.copy()
     registry[DCI_DATE_COLUMNS] = timings_dci_dates(timings, registry)
     registry['DCI_ischemia'] = timings_dci_status(timings, registry)
+
+    # Clinical assessability at DCI diagnosis (timings file); codes other than 0 / 1 -> unknown
+    assessable = pd.to_numeric(_outcome_lookup(timings, registry, [CLINICAL_ASSESSABILITY])[CLINICAL_ASSESSABILITY], errors='coerce')
+    registry[CLINICAL_ASSESSABILITY] = assessable.where(assessable.isin([YES, NO]))
     registry['Age'] = _age(registry)
 
     # CVS start: first available detection date; a dated CVS implies CVS_YN = 1
@@ -150,6 +156,7 @@ def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame, timings: p
     endovascular = (registry['Coiling'] == YES) | (registry['Stenting'] == YES)
     unknown = ~endovascular & (registry['Coiling'].isna() | registry['Stenting'].isna())
     registry['coiling'] = endovascular.astype(float).where(~unknown)
+    registry['treatment'] = _treatment(registry)
 
     # First artery code only, e.g. '7, 20' -> 7, '8 (left)' -> 8
     code = registry['Aneurysm_Artery_Code'].astype(str).str.split(',').str[0].str.split('(').str[0]
@@ -161,19 +168,34 @@ def _prepare_registry(registry: pd.DataFrame, outcomes: pd.DataFrame, timings: p
 
     registry[LINKED_COLUMNS] = _outcome_lookup(outcomes, registry)
 
-    # Death after discharge (registry) -> 1-year mRS 6
+    # Registry death (in hospital or after discharge; all before the 1-year visit) -> 1-year mRS 6
     registry.loc[registry['Death'] == YES, 'mRS_FU_1y'] = DEAD_MRS
     registry.loc[registry['Death'] == YES, FOLLOW_UP_COLUMNS] = [FOLLOW_UP_DEATH, pd.NA]
     return registry
 
 
-def select_registry(sources: RawSources, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
-    """Registry rows with a known admission date, optionally from `first_year` on, with outcomes attached."""
-    admission = sources.registry['Date_admission']
+def _selected_rows(registry: pd.DataFrame, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
+    admission = registry['Date_admission']
     keep = admission.notna()
     if year_filter == YearFilter.STUDY_PERIOD:
         keep &= admission >= f'{first_year}-01-01'
-    return _prepare_registry(sources.registry[keep], _prepare_outcomes(sources.outcomes), sources.dci_timings)
+    return registry[keep]
+
+
+def select_registry(sources: RawSources, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
+    """Registry rows with a known admission date, optionally from `first_year` on, with outcomes attached."""
+    registry = _selected_rows(sources.registry, year_filter, first_year)
+    return _prepare_registry(registry, _prepare_outcomes(sources.outcomes), sources.dci_timings)
+
+
+def linkage_counts(sources: RawSources, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
+    """Registry rows per match type when linking the outcomes and DCI timings files, e.g. SOS ID 400, unmatched 8."""
+    registry = _selected_rows(sources.registry, year_filter, first_year)
+    counts = [
+        link(_prepare_outcomes(sources.outcomes), registry, LINKED_COLUMNS).counts().assign(source='outcomes'),
+        link(sources.dci_timings, registry, [DCI_VERIFIED]).counts().assign(source='DCI timings'),
+    ]
+    return pd.concat(counts)[['source', 'match', 'n']]
 
 
 def population_flow(registry: pd.DataFrame, timings: pd.DataFrame, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
@@ -254,14 +276,13 @@ ROWS: list[tuple[str, Optional[Callable[[pd.DataFrame], str]]]] = [
     ('  World Federation of Neurological Surgeons Scale', _median_iqr('WFNS')),
     ('  Modified Fisher Scale', _median_iqr('Fisher_Score')),
     ('Acute treatment', None),
-    ('  Coiling', _count('coiling')),
-    ('  Clipping', _count('Clipping')),
+    *[(f'  {treatment.value}', _count('treatment', treatment.value)) for treatment in Treatment],
     ('Outcomes', None),
     ('  Vasospasm', _count('CVS_YN')),
     ('  DCI related infarction', _count('DCI_infarct')),
     ('  ICU length of stay (d)', _median_iqr('los_icu')),
     ('  Hospital length of stay (d)', _median_iqr('los')),
-    ('  Hospital mortality', _count('Death')),
+    ('  Death', _count('Death')),
     ('  Discharge modified Rankin Scale', _median_iqr('mRS_discharge')),
     ('  1-yr modified Rankin Scale', _median_iqr('mRS_FU_1y')),
 ]
@@ -269,7 +290,9 @@ ROWS: list[tuple[str, Optional[Callable[[pd.DataFrame], str]]]] = [
 
 def build_table1(sources: RawSources, year_filter: YearFilter, first_year: int) -> pd.DataFrame:
     """Formatted Table 1; columns 'Overall Population\\n(n = 408)', 'DCI\\n(n = ...)', 'No DCI\\n(n = ...)'."""
+    # Patients with a verified DCI status only, so that DCI + no DCI = overall
     registry = select_registry(sources, year_filter, first_year)
+    registry = registry[registry['DCI_ischemia'].notna()]
     groups = {
         GROUP_ALL: registry,
         GROUP_DCI: registry[registry['DCI_ischemia'] == 1],

@@ -77,3 +77,15 @@ def test_negative_registry_age_recomputed_from_birth_date():
     age = table1._age(registry)
 
     assert age.round(1).tolist() == [50.0, 45.0, 45.5]
+
+
+def test_treatment_categories_are_mutually_exclusive():
+    # endovascular (coiling / stenting) x clipping; unknown when the other procedure is not recorded
+    registry = pd.DataFrame({'coiling': [1.0, 0.0, 1.0, 0.0, 1.0, NAN],
+                             'Clipping': [0.0, 1.0, 1.0, 0.0, NAN, 0.0]})
+
+    treatment = table1._treatment(registry)
+
+    T = table1.Treatment
+    assert treatment.tolist()[:4] == [T.ENDOVASCULAR.value, T.CLIPPING.value, T.BOTH.value, T.NONE.value]
+    assert treatment.iloc[4:].isna().all()
