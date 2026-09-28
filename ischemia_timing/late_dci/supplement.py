@@ -68,9 +68,12 @@ DCI_TIMING_OUTCOMES_METHODS = (
     'death only, without substitution by the 2- or 5-year visit; (2) survivors only, additionally adjusted for the '
     'interval from admission to the follow-up visit; (3) mRS at discharge; (4) additional adjustment for '
     'DCI-related infarction; (5) exclusion of in-hospital deaths; (6) additional adjustment for calendar year; '
-    '(7) patients with a documented ictus date only. The association of DCI timing with missing follow-up mRS was '
-    'assessed with logistic regression, and the association of DCI timing with admission severity with Spearman '
-    'correlation and linear regression.'
+    '(7) patients with a documented ictus date only; (8) patients clinically assessable at DCI diagnosis; (9) missing '
+    'mRS set to 0 (best case) and (10) to 6 (worst case); (11) patients alive on day 14, and (12) day 21, with DCI by '
+    'that day. Proportional odds were assessed by comparing the ordinal odds ratio with logistic regressions at each '
+    'cumulative mRS threshold, and linearity of DCI timing with a quadratic term (likelihood-ratio test). The '
+    'association of DCI timing with missing follow-up mRS was assessed with logistic regression, and the association '
+    'of DCI timing with admission severity with Spearman correlation and linear regression.'
 )
 
 
@@ -174,6 +177,53 @@ def _ridge(results_dir: str) -> str:
     return _markdown(_estimate_columns(table, 'HR', 'HR'))
 
 
+def _cumulative_incidence_day21(results_dir: str) -> str:
+    # Last row of each Aalen-Johansen curve = day 21, e.g. 'alive discharge censored | 0.201 | 0.066'
+    rows = []
+    for file, handling, competing in [
+        ('cumulative_incidence.csv', 'censored', 'death'),
+        ('cumulative_incidence_discharge_competing.csv', 'competing event', 'death or alive discharge'),
+    ]:
+        day21 = _read(results_dir, 'late_dci', file).iloc[-1]
+        rows.append({'alive discharge': handling, 'late DCI': f'{day21["cif_event"]:.3f}',
+                     'competing event': competing, 'competing cumulative incidence': f'{day21["cif_competing"]:.3f}'})
+    return _markdown(pd.DataFrame(rows))
+
+
+def _aspirin_split(results_dir: str) -> str:
+    # e.g. 'Aspirin before SAH | 3.15 | 8.29 | 2.64 (0.24–29.15) | 0.43 | 46 | 4'
+    table = _read(results_dir, 'late_dci', 'aspirin_time_varying.csv')
+    return _markdown(pd.DataFrame({
+        'Covariate': table['covariate'].map(lambda name: COVARIATE_LABELS.get(name, name)),
+        'HR days 8–14': table['HR_early'].map(lambda value: f'{value:.2f}'),
+        'HR days 15–21': table['HR_late'].map(lambda value: f'{value:.2f}'),
+        'Ratio (95% CI)': [_format_estimate(*row) for row in table[['ratio_late_vs_early', 'lower', 'upper']].values],
+        'p': table['p'].map(_format_p),
+        'Events days 8–14': table['events_early'].astype(str),
+        'Events days 15–21': table['events_late'].astype(str),
+    }))
+
+
+def _linearity(results_dir: str) -> str:
+    table = _read(results_dir, 'dci_timing_outcomes', 'linearity.csv')
+    return _markdown(pd.DataFrame({
+        'n': table['n'].astype(str),
+        'AIC linear': table['aic_linear'].map(lambda value: f'{value:.1f}'),
+        'AIC quadratic': table['aic_quadratic'].map(lambda value: f'{value:.1f}'),
+        'Likelihood ratio (1 df)': table['lr_statistic'].map(lambda value: f'{value:.2f}'),
+        'p': table['p_lr'].map(_format_p),
+    }))
+
+
+def _linkage(results_dir: str) -> str:
+    tables = [
+        _read(results_dir, 'late_dci', 'linkage.csv').assign(target='DCI timings'),
+        _read(results_dir, 'table1', 'linkage.csv').assign(target='registry'),
+        _read(results_dir, 'figure1', 'ct_linkage.csv').assign(source='ICU CTs', target='registry'),
+    ]
+    return _markdown(_tidy(pd.concat(tables)[['source', 'target', 'match', 'n']], '.0f'))
+
+
 def _model_check(results_dir: str) -> str:
     check = _read(results_dir, 'late_dci', 'model_check.csv').drop(columns=['bootstrap_failed'])
     groups = _read(results_dir, 'late_dci', 'calibration_groups.csv')
@@ -190,7 +240,7 @@ ITEMS = [
 
     # Tables: late-onset DCI
     Item(Kind.TABLE, 'Hypertension and aspirin: sequential adjustment',
-         'Cause-specific Cox models of late DCI (day-7 landmark, complete case, n = 275, 66 events). Covariates are '
+         'Cause-specific Cox models of late DCI (day-7 landmark, complete case, n = 259, 50 events). Covariates are '
          'added stepwise; severity = WFNS grade and modified Fisher grade; full model = primary model.',
          _estimates('late_dci', 'sequential_adjustment.csv', 'HR', 'HR'), BOTH),
     Item(Kind.TABLE, 'Hypertension and aspirin: models with each exposure',
@@ -213,6 +263,13 @@ ITEMS = [
     Item(Kind.TABLE, 'Late DCI: proportional hazards',
          'Schoenfeld residual test (rank time) for the primary model.',
          _plain('late_dci', 'proportional_hazards.csv'), ALL_ONLY),
+    Item(Kind.TABLE, 'Late DCI: aspirin before and after day 14',
+         'Primary model with the aspirin effect split at day 14 (days 8–14 vs 15–21). Ratio = HR after / HR before.',
+         _aspirin_split, BOTH),
+    Item(Kind.TABLE, 'Late DCI: cumulative incidence at day 21 by handling of alive discharge',
+         'Aalen–Johansen estimates in the day-7 risk set (full cohort). Alive discharge before day 21 censored, or '
+         'treated as a competing event (cumulative incidence of in-hospital late DCI).',
+         _cumulative_incidence_day21, BOTH),
     Item(Kind.TABLE, 'Late DCI: hypertension and aspirin in the risk set',
          'Patients at risk on day 7 by hypertension and aspirin use; odds ratio and Fisher exact p for the '
          'association of hypertension with aspirin.',
@@ -225,6 +282,11 @@ ITEMS = [
          _plain('late_dci', 'flow.csv'), ALL_ONLY),
     Item(Kind.TABLE, 'Late DCI: data sources and quality', 'Source of ictus date, death status and age.',
          _plain('late_dci', 'data_quality.csv'), ALL_ONLY),
+    Item(Kind.TABLE, 'Record linkage',
+         'Match of each file to the DCI timings file (late DCI), to the registry (Table 1) and of ICU CTs to the registry '
+         '(Figure 1): by study ID, else by name and date of birth; conflicting duplicate records set to missing. '
+         'Unmatched CTs include CTs of patients outside the study period.',
+         _linkage, ALL_ONLY),
 
     # Tables: DCI timing and outcome
     Item(Kind.TABLE, 'DCI timing and outcome: sensitivity analyses',
@@ -232,6 +294,13 @@ ITEMS = [
          'DCI-related infarction, adjusted for age, sex, WFNS and modified Fisher grade unless stated. OR < 1: later '
          'DCI, lower mRS / less infarction.',
          _estimates('dci_timing_outcomes', 'sensitivity.csv', 'OR_per_day', 'OR', drop=('model', 'concern')), BOTH),
+    Item(Kind.TABLE, 'DCI timing and outcome: proportional odds',
+         'Odds ratio per day of later DCI onset from the ordinal model and from logistic regressions at each cumulative '
+         'mRS threshold, adjusted as the primary model. Similar odds ratios support proportional odds.',
+         _estimates('dci_timing_outcomes', 'proportional_odds.csv', 'OR_per_day', 'OR', drop=('outcome',)), BOTH),
+    Item(Kind.TABLE, 'DCI timing and outcome: linearity',
+         'Primary ordinal model with a centred quadratic term of DCI day vs the linear model; likelihood-ratio test.',
+         _linearity, BOTH),
     Item(Kind.TABLE, 'DCI timing and outcome: primary and submitted models',
          '"submitted (probit)" reproduces the submitted manuscript (probit on mRS > 2, missing mRS counted as > 2). '
          '"logistic": ordinal on mRS 0–6 (infarction: binary), missing excluded. "logistic, mRS > 2": binary.',
@@ -274,7 +343,7 @@ ITEMS = [
          'death as a competing risk.',
          _figure('late_dci', 'calibration.png'), BOTH),
     Item(Kind.FIGURE, 'Cumulative incidence of late DCI and death without DCI from day 7',
-         'Aalen–Johansen estimates in the day-7 risk set (n = 310), overall and by WFNS grade.',
+         'Aalen–Johansen estimates in the day-7 risk set (n = 295), overall and by WFNS grade.',
          _figure('late_dci', 'cumulative_incidence.png'), ALL_ONLY),
 ]
 
